@@ -14,6 +14,8 @@ and this project adheres to Semantic Versioning.
 - Master entry point `AGENTS.md` and `00_READ_FIRST.md`.
 - AI Service Foundation in `src/ai/` (`AIManager`, `VisionProvider`, `OCRProvider`, `LLMProvider`, `LocalVisionProvider`).
 - Multi-Deployment Vision Provider Foundation in `src/ai/` (`AIExecutionMode`, `NormalizedPoint`, `NormalizedQuad`, `ImageInputSource`, `LocalServiceVisionProvider`, `RemoteAPIVisionProvider`).
+- Free Browser Document Corner Detection Provider in `src/ai/browser/` (`browser-image-loader`, `grayscale`, `edge-detector`, `geometry`, `document-corner-detector`, `test-harness`).
+
 
 
 

@@ -43,6 +43,8 @@ export interface DocumentDetectionResult {
   corners?: NormalizedQuad;
   executionMode?: AIExecutionMode;
   providerId?: string;
+  processingDurationMs?: number;
+  warnings?: string[];
   error?: AIProviderError;
 }
 

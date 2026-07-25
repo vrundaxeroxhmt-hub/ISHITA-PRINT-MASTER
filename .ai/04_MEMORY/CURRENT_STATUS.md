@@ -12,6 +12,8 @@
 - [x] Configure `AGENTS.md` and `00_READ_FIRST.md`.
 - [x] Create AI Service Foundation module in `src/ai/` (`AIManager`, provider interfaces, `LocalVisionProvider`).
 - [x] Implement Multi-Deployment Vision Provider Foundation (`browser`, `local-service`, `remote-api` adapters, registry & fallback resolver).
-- [ ] Implement production AI vision / OCR / LLM providers upon request.
+- [x] Implement Free Browser Document Corner Detection Provider in `src/ai/browser/` (grayscale, Sobel edge detector, corner geometry, loader, test harness).
+- [ ] Implement UI auto-detect corner button in PerspectiveCropDialog upon request.
+
 
 

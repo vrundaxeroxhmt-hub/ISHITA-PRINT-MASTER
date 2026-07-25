@@ -1,5 +1,13 @@
 import type { VisionProvider } from '../interfaces/VisionProvider.ts';
-import type { AIExecutionMode, DocumentDetectionResult, ImageEnhancementOptions, ImageEnhancementResult, ImageInput, NormalizedQuad } from '../types.ts';
+import type {
+  AIExecutionMode,
+  DocumentDetectionResult,
+  ImageEnhancementOptions,
+  ImageEnhancementResult,
+  ImageInput,
+} from '../types.ts';
+import { loadBrowserImageData } from '../browser/browser-image-loader.ts';
+import { detectDocumentCorners } from '../browser/document-corner-detector.ts';
 
 export class LocalVisionProvider implements VisionProvider {
   public readonly id = 'browser-local-vision';
@@ -7,30 +15,66 @@ export class LocalVisionProvider implements VisionProvider {
   public readonly mode: AIExecutionMode = 'browser';
 
   public async isAvailable(): Promise<boolean> {
-    return true;
+    return typeof window !== 'undefined' && typeof document !== 'undefined';
   }
 
-  public async detectDocument(_input: ImageInput): Promise<DocumentDetectionResult> {
-    const defaultCorners: NormalizedQuad = [
-      { x: 2, y: 2 },
-      { x: 98, y: 2 },
-      { x: 98, y: 98 },
-      { x: 2, y: 98 },
-    ];
+  public async detectDocument(input: ImageInput): Promise<DocumentDetectionResult> {
+    const startTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
+    // 1. Load browser image data & downscale for fast analysis
+    const loadResult = await loadBrowserImageData(input);
+
+    const endTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const durationMs = Math.round(endTime - startTime);
+
+    if ('error' in loadResult) {
+      return {
+        detected: false,
+        documentType: 'unknown',
+        confidence: 0,
+        executionMode: this.mode,
+        providerId: this.id,
+        processingDurationMs: durationMs,
+        error: loadResult.error,
+      };
+    }
+
+    // 2. Perform real browser document corner detection
+    const { imageData, analysisWidth, analysisHeight, originalWidth, originalHeight } = loadResult;
+
+    const detection = detectDocumentCorners(imageData, analysisWidth, analysisHeight);
+
+    const totalDurationMs = Math.round(
+      (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startTime
+    );
+
+    if (!detection.detected || !detection.corners) {
+      return {
+        detected: false,
+        documentType: 'unknown',
+        confidence: detection.confidence,
+        executionMode: this.mode,
+        providerId: this.id,
+        processingDurationMs: totalDurationMs,
+        warnings: detection.warnings,
+      };
+    }
 
     return {
       detected: true,
       documentType: 'document',
-      confidence: 0.95,
+      confidence: detection.confidence,
       boundingBox: {
         x: 0,
         y: 0,
-        width: 100,
-        height: 100,
+        width: originalWidth,
+        height: originalHeight,
       },
-      corners: defaultCorners,
+      corners: detection.corners,
       executionMode: this.mode,
       providerId: this.id,
+      processingDurationMs: totalDurationMs,
+      warnings: detection.warnings.length > 0 ? detection.warnings : undefined,
     };
   }
 
