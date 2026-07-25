@@ -13,6 +13,8 @@ and this project adheres to Semantic Versioning.
 - AI Memory system (`CURRENT_STATUS.md`, `DECISIONS.md`, `KNOWN_BUGS.md`).
 - Master entry point `AGENTS.md` and `00_READ_FIRST.md`.
 - AI Service Foundation in `src/ai/` (`AIManager`, `VisionProvider`, `OCRProvider`, `LLMProvider`, `LocalVisionProvider`).
+- Multi-Deployment Vision Provider Foundation in `src/ai/` (`AIExecutionMode`, `NormalizedPoint`, `NormalizedQuad`, `ImageInputSource`, `LocalServiceVisionProvider`, `RemoteAPIVisionProvider`).
+
 
 
 ---

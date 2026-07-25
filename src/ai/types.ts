@@ -1,3 +1,5 @@
+export type AIExecutionMode = 'browser' | 'local-service' | 'remote-api';
+
 export interface BoundingBox {
   x: number;
   y: number;
@@ -5,11 +7,43 @@ export interface BoundingBox {
   height: number;
 }
 
+export interface NormalizedPoint {
+  x: number; // percentage 0..100
+  y: number; // percentage 0..100
+}
+
+export type NormalizedQuad = [
+  NormalizedPoint, // top-left
+  NormalizedPoint, // top-right
+  NormalizedPoint, // bottom-right
+  NormalizedPoint  // bottom-left
+];
+
+export type ImageInputSource =
+  | { type: 'data-url'; dataUrl: string; mimeType?: string }
+  | { type: 'blob'; blob: Blob | File }
+  | { type: 'local-file-path'; filePath: string }
+  | { type: 'remote-url'; url: string }
+  | { type: 'raw-bytes'; bytes: Uint8Array; mimeType: string };
+
+export type ImageInput = string | Blob | File | ImageInputSource;
+
+export interface AIProviderError {
+  code: 'UNSUPPORTED_INPUT' | 'PROVIDER_UNAVAILABLE' | 'EXECUTION_FAILED' | 'AUTHENTICATION_REQUIRED';
+  message: string;
+  providerId: string;
+  mode: AIExecutionMode;
+}
+
 export interface DocumentDetectionResult {
   detected: boolean;
   documentType: 'aadhaar' | 'pan' | 'passport' | 'photo' | 'document' | 'unknown';
   confidence: number;
   boundingBox?: BoundingBox;
+  corners?: NormalizedQuad;
+  executionMode?: AIExecutionMode;
+  providerId?: string;
+  error?: AIProviderError;
 }
 
 export interface OCRTextBlock {
@@ -23,6 +57,9 @@ export interface OCRExtractionResult {
   confidence: number;
   blocks: OCRTextBlock[];
   language?: string;
+  executionMode?: AIExecutionMode;
+  providerId?: string;
+  error?: AIProviderError;
 }
 
 export interface ImageEnhancementOptions {
@@ -36,6 +73,9 @@ export interface ImageEnhancementResult {
   success: boolean;
   enhancedImageUri?: string;
   operationsApplied: string[];
+  executionMode?: AIExecutionMode;
+  providerId?: string;
+  error?: AIProviderError;
 }
 
 export interface DocumentPair {
@@ -49,6 +89,9 @@ export interface DocumentPairingResult {
   pairs: DocumentPair[];
   unpairedIds: string[];
   confidence: number;
+  executionMode?: AIExecutionMode;
+  providerId?: string;
+  error?: AIProviderError;
 }
 
 export interface WorkflowSuggestionResult {
@@ -56,4 +99,7 @@ export interface WorkflowSuggestionResult {
   parameters: Record<string, unknown>;
   confidence: number;
   reasoning: string;
+  executionMode?: AIExecutionMode;
+  providerId?: string;
+  error?: AIProviderError;
 }

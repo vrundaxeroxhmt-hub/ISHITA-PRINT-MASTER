@@ -1,11 +1,23 @@
 import type { VisionProvider } from '../interfaces/VisionProvider.ts';
-import type { DocumentDetectionResult, ImageEnhancementOptions, ImageEnhancementResult } from '../types.ts';
+import type { AIExecutionMode, DocumentDetectionResult, ImageEnhancementOptions, ImageEnhancementResult, ImageInput, NormalizedQuad } from '../types.ts';
 
 export class LocalVisionProvider implements VisionProvider {
-  public readonly id = 'local-vision-provider';
-  public readonly name = 'Local Vision Provider (Fallback)';
+  public readonly id = 'browser-local-vision';
+  public readonly name = 'Browser Local Vision Provider';
+  public readonly mode: AIExecutionMode = 'browser';
 
-  public async detectDocument(_input: unknown): Promise<DocumentDetectionResult> {
+  public async isAvailable(): Promise<boolean> {
+    return true;
+  }
+
+  public async detectDocument(_input: ImageInput): Promise<DocumentDetectionResult> {
+    const defaultCorners: NormalizedQuad = [
+      { x: 2, y: 2 },
+      { x: 98, y: 2 },
+      { x: 98, y: 98 },
+      { x: 2, y: 98 },
+    ];
+
     return {
       detected: true,
       documentType: 'document',
@@ -16,11 +28,14 @@ export class LocalVisionProvider implements VisionProvider {
         width: 100,
         height: 100,
       },
+      corners: defaultCorners,
+      executionMode: this.mode,
+      providerId: this.id,
     };
   }
 
   public async enhanceImage(
-    _input: unknown,
+    _input: ImageInput,
     options?: ImageEnhancementOptions
   ): Promise<ImageEnhancementResult> {
     const operations: string[] = [];
@@ -33,6 +48,8 @@ export class LocalVisionProvider implements VisionProvider {
       success: true,
       enhancedImageUri: undefined,
       operationsApplied: operations.length > 0 ? operations : ['default-enhancement'],
+      executionMode: this.mode,
+      providerId: this.id,
     };
   }
 }

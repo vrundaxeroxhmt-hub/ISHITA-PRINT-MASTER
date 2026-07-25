@@ -1,8 +1,10 @@
-import type { DocumentDetectionResult, ImageEnhancementOptions, ImageEnhancementResult } from '../types.ts';
+import type { AIExecutionMode, DocumentDetectionResult, ImageEnhancementOptions, ImageEnhancementResult, ImageInput } from '../types.ts';
 
 export interface VisionProvider {
   readonly id: string;
   readonly name: string;
-  detectDocument(input: unknown): Promise<DocumentDetectionResult>;
-  enhanceImage(input: unknown, options?: ImageEnhancementOptions): Promise<ImageEnhancementResult>;
+  readonly mode: AIExecutionMode;
+  isAvailable(): Promise<boolean>;
+  detectDocument(input: ImageInput): Promise<DocumentDetectionResult>;
+  enhanceImage(input: ImageInput, options?: ImageEnhancementOptions): Promise<ImageEnhancementResult>;
 }
