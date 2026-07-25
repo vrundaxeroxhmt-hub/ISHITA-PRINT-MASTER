@@ -6,15 +6,10 @@ export * from './providers/LocalVisionProvider.ts';
 export * from './providers/LocalServiceVisionProvider.ts';
 export * from './providers/RemoteAPIVisionProvider.ts';
 export * from './AIManager.ts';
-
-import { AIManager } from './AIManager.ts';
-import { LocalVisionProvider } from './providers/LocalVisionProvider.ts';
-import { LocalServiceVisionProvider } from './providers/LocalServiceVisionProvider.ts';
-import { RemoteAPIVisionProvider } from './providers/RemoteAPIVisionProvider.ts';
-
-export const aiManager = new AIManager();
-
-// Register default execution mode providers into registry
-aiManager.registerVisionProvider(new LocalVisionProvider());
-aiManager.registerVisionProvider(new LocalServiceVisionProvider());
-aiManager.registerVisionProvider(new RemoteAPIVisionProvider());
+export * from './storage/AIStorageProvider.ts';
+export * from './storage/BrowserLocalStorageProvider.ts';
+export * from './memory/AISettingsStore.ts';
+export * from './memory/AIJobMemoryStore.ts';
+export * from './orchestrator/JobSessionRouter.ts';
+export * from './utils/createJobSessionId.ts';
+export * from './bootstrap/createDefaultAIManager.ts';
