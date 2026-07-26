@@ -28,16 +28,18 @@ export class CompletionWindowTimer {
     this.cancelTimer(customerId);
 
     const durationMs = Math.max(1, windowSeconds) * 1000;
-    const expiresAt = baseTimestamp + durationMs;
-    const remainingMs = Math.max(1, expiresAt - Date.now());
+    const now = Date.now();
+    const expiresAt = Math.max(now, baseTimestamp) + durationMs;
+    const remainingMs = Math.max(100, expiresAt - now);
 
     const timerId = setTimeout(() => {
       this.timers.delete(customerId);
       if (this.onExpiredCallback) {
         try {
+          console.log(`[AI Queue] Completion window fired for customer ${customerId}`);
           this.onExpiredCallback(customerId, jobSessionId);
-        } catch {
-          // Prevent callback error from crashing process
+        } catch (err) {
+          console.error('[AI Queue] Error in completion window expired callback:', err);
         }
       }
     }, remainingMs);
@@ -49,6 +51,7 @@ export class CompletionWindowTimer {
       timerId,
     });
 
+    console.log(`[AI Queue] Completion window started for customer ${customerId} (${windowSeconds}s)`);
     return expiresAt;
   }
 
@@ -66,12 +69,13 @@ export class CompletionWindowTimer {
     const remainingMs = expiresAt - now;
 
     if (remainingMs <= 0) {
-      // Timer already expired while page was closed
+      // Timer already expired while page was closed -> trigger callback immediately
       if (this.onExpiredCallback) {
         try {
+          console.log(`[AI Queue] Restored completion window already expired for customer ${customerId}, triggering now`);
           this.onExpiredCallback(customerId, jobSessionId);
-        } catch {
-          // Ignore callback error
+        } catch (err) {
+          console.error('[AI Queue] Error in restored completion window callback:', err);
         }
       }
       return;
@@ -81,9 +85,10 @@ export class CompletionWindowTimer {
       this.timers.delete(customerId);
       if (this.onExpiredCallback) {
         try {
+          console.log(`[AI Queue] Completion window fired for customer ${customerId}`);
           this.onExpiredCallback(customerId, jobSessionId);
-        } catch {
-          // Ignore callback error
+        } catch (err) {
+          console.error('[AI Queue] Error in completion window callback:', err);
         }
       }
     }, remainingMs);
@@ -94,6 +99,8 @@ export class CompletionWindowTimer {
       expiresAt,
       timerId,
     });
+
+    console.log(`[AI Queue] Completion window timer restored for customer ${customerId} (${Math.ceil(remainingMs / 1000)}s remaining)`);
   }
 
   public cancelTimer(customerId: string): boolean {

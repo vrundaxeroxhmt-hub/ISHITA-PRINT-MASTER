@@ -41,6 +41,27 @@ export function Index() {
   const [folderBusy, setFolderBusy] = useState(false);
   const [printSettings, setPrintSettings] = useState<PrintSettings>({ printerName:"", paperSize:"A4", copies:1, landscape:false, color:true, duplexMode:"simplex", pagesPerSheet:1, scaleFactor:100 });
   const [printers, setPrinters] = useState<Array<{name:string;displayName?:string;isDefault?:boolean}>>([]);
+  const [completionWindowSeconds, setCompletionWindowSeconds] = useState<number>(45);
+  useEffect(() => {
+    fetch("http://127.0.0.1:3001/api/settings")
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.completionWindowSeconds) setCompletionWindowSeconds(res.completionWindowSeconds);
+      })
+      .catch(() => {});
+  }, []);
+  const handleUpdateCompletionWindow = async (seconds: number) => {
+    setCompletionWindowSeconds(seconds);
+    const { updateAISettings } = await import("@/ai");
+    updateAISettings({ customerCompletionWindowSeconds: seconds });
+    try {
+      await fetch("http://127.0.0.1:3001/api/settings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ completionWindowSeconds: seconds }),
+      });
+    } catch {}
+  };
   useEffect(() => { localStorage.setItem("printdesk.customerNameFontSize", String(customerNameFontSize)); }, [customerNameFontSize]);
   useEffect(() => { localStorage.setItem("printdesk.customerMobileFontSize", String(customerMobileFontSize)); }, [customerMobileFontSize]);
   useEffect(() => { fetch("http://127.0.0.1:3001/api/settings/storage").then((response)=>response.json()).then((result)=>setMasterFolder(result.masterFolder||"")).catch(()=>{}); }, []);
@@ -76,9 +97,15 @@ export function Index() {
     return () => window.clearInterval(timer);
   }, []);
 
+  const isSameCustomer = useCallback((id1?: string | null, id2?: string | null) => {
+    if (!id1 || !id2) return false;
+    if (id1 === id2) return true;
+    return id1.replace(/^meta:/, '') === id2.replace(/^meta:/, '');
+  }, []);
+
   const selectedCustomer = useMemo(
-    () => customers.find((c) => c.id === selectedCustomerId) ?? null,
-    [customers, selectedCustomerId],
+    () => customers.find((c) => isSameCustomer(c.id, selectedCustomerId)) ?? null,
+    [customers, selectedCustomerId, isSameCustomer],
   );
   const filteredCustomers = useMemo(() => {
     const now = new Date();
@@ -87,26 +114,33 @@ export function Index() {
     return customers.filter((customer) => customer.lastMessageAt >= cutoff);
   }, [customers, historyFilter, customDays]);
 
+  useEffect(() => {
+    if (!selectedCustomerId && filteredCustomers.length > 0) {
+      setSelectedCustomerId(filteredCustomers[0].id);
+    }
+  }, [selectedCustomerId, filteredCustomers]);
+
   const customerJobs = useMemo<JobCard[]>(() => {
-    const generatedSourceIds = new Set(jobs.filter((job) => job.customerId === selectedCustomerId).flatMap((job) => job.files.flatMap((file) => file.layoutType === "multiPage" && file.multiLayout?.keepSources !== true ? file.multiLayout?.sourceFileIds || [] : file.layoutType === "passport" && file.passportLayout?.hideSources !== false ? file.passportLayout?.sourceFileIds || [] : [])));
+    if (!selectedCustomerId) return [];
+    const generatedSourceIds = new Set(jobs.filter((job) => isSameCustomer(job.customerId, selectedCustomerId)).flatMap((job) => job.files.flatMap((file) => file.layoutType === "multiPage" && file.multiLayout?.keepSources !== true ? file.multiLayout?.sourceFileIds || [] : file.layoutType === "passport" && file.passportLayout?.hideSources !== false ? file.passportLayout?.sourceFileIds || [] : [])));
     const base = jobs
-      .filter((j) => j.customerId === selectedCustomerId)
+      .filter((j) => isSameCustomer(j.customerId, selectedCustomerId))
       .map((j) => ({ ...j, files: j.files.filter((f) => !hiddenIds.has(f.id) && (!generatedSourceIds.has(f.id) || f.layoutType === "multiPage")) }))
       .filter((j) => j.files.length > 0)
       .sort((a, b) => b.lastAt - a.lastAt);
     return base;
-  }, [jobs, selectedCustomerId, hiddenIds]);
+  }, [jobs, selectedCustomerId, hiddenIds, isSameCustomer]);
 
   const customerImages = useMemo<PrintFile[]>(() => {
     if (!selectedCustomerId) return [];
     const files: PrintFile[] = [];
     for (const j of jobs) {
-      if (j.customerId !== selectedCustomerId) continue;
+      if (!isSameCustomer(j.customerId, selectedCustomerId)) continue;
       for (const f of j.files) if (f.kind === "image" && f.layoutType !== "aadhaar130") files.push(f);
     }
     return files;
-  }, [jobs, selectedCustomerId]);
-  const customerFiles = useMemo(() => jobs.filter((job) => job.customerId === selectedCustomerId).flatMap((job) => job.files), [jobs, selectedCustomerId]);
+  }, [jobs, selectedCustomerId, isSameCustomer]);
+  const customerFiles = useMemo(() => jobs.filter((job) => isSameCustomer(job.customerId, selectedCustomerId)).flatMap((job) => job.files), [jobs, selectedCustomerId, isSameCustomer]);
 
   const selectedFile = useMemo(() => {
     for (const j of jobs) {
@@ -248,6 +282,28 @@ export function Index() {
                 <label className="block text-[9px]">Scale: {printSettings.scaleFactor}%<input type="range" min={10} max={200} value={printSettings.scaleFactor} onChange={(e)=>updatePrintSettings({scaleFactor:+e.target.value})} className="w-full accent-cyan-400"/></label>
                 <label className="flex items-center justify-between rounded border border-border p-2 text-[9px]"><span>Color printing</span><input type="checkbox" checked={printSettings.color} onChange={(e)=>updatePrintSettings({color:e.target.checked})} className="accent-cyan-400"/></label>
                 <button onClick={()=>updatePrintSettings({printerName:"",paperSize:"A4",copies:1,landscape:false,color:true,duplexMode:"simplex",pagesPerSheet:1,scaleFactor:100})} className="w-full rounded border border-primary/50 py-1.5 text-[10px] text-primary">Safe A4 defaults</button>
+              </div>
+              <div className="mt-4 border-t border-border pt-3">
+                <div className="text-[10px] font-semibold">Job Completion Window</div>
+                <p className="mt-0.5 text-[9px] text-muted-foreground">
+                  Time allowed to combine consecutive customer files and instructions into one job.
+                </p>
+                <div className="mt-2 flex items-center gap-2">
+                  <select
+                    value={completionWindowSeconds}
+                    onChange={(e) => handleUpdateCompletionWindow(Number(e.target.value))}
+                    className="w-full rounded border border-border bg-background p-1.5 text-[10px]"
+                  >
+                    <option value={15}>15 seconds</option>
+                    <option value={30}>30 seconds</option>
+                    <option value={45}>45 seconds (Default)</option>
+                    <option value={60}>60 seconds (1 min)</option>
+                    <option value={90}>90 seconds (1.5 min)</option>
+                    <option value={120}>120 seconds (2 min)</option>
+                    <option value={180}>180 seconds (3 min)</option>
+                    <option value={300}>300 seconds (5 min)</option>
+                  </select>
+                </div>
               </div>
               <div className="mt-4 border-t border-border pt-3"><div className="text-[10px] font-semibold">Master Save Folder</div><p className="mt-0.5 text-[9px] text-muted-foreground">Files save inside Year / Month / Date / Mobile / Batch_Time</p><div className="mt-2 break-all rounded border border-border bg-background/60 p-2 text-[9px] text-muted-foreground">{masterFolder || "Not configured"}</div><button disabled={folderBusy} onClick={async()=>{setFolderBusy(true);try{const response=await fetch("http://127.0.0.1:3001/api/settings/storage/pick",{method:"POST"});const result=await response.json();if(!response.ok)throw new Error(result.error||"Folder selection failed");if(result.masterFolder)setMasterFolder(result.masterFolder);}finally{setFolderBusy(false);}}} className="mt-2 w-full rounded bg-primary py-1.5 text-[10px] text-primary-foreground disabled:opacity-50">{folderBusy?"Opening Folder Picker...":"Browse & Select Master Folder"}</button></div>
             </div>}

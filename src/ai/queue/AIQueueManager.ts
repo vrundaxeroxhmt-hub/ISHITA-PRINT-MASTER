@@ -3,7 +3,7 @@ import type {
   CustomerJobState,
   QueuePriority,
 } from '../types.ts';
-import type { CustomerQueueItem, NormalizedInboundEvent, QueueLifecycleHooks, QueueState } from './types.ts';
+import type { CustomerQueueItem, NormalizedInboundEvent, Phase2JobProcessingState, QueueLifecycleHooks, QueueState } from './types.ts';
 import { AIQueueStore } from './AIQueueStore.ts';
 import { CompletionWindowTimer } from './CompletionWindowTimer.ts';
 import { QueueEventEmitter } from './QueueEventEmitter.ts';
@@ -13,6 +13,9 @@ import { QueueLifecycleHooksRegistry } from './QueueLifecycleHooks.ts';
 import { JobSessionRouter } from '../orchestrator/JobSessionRouter.ts';
 import { AIJobMemoryStore } from '../memory/AIJobMemoryStore.ts';
 import { AISettingsStore } from '../memory/AISettingsStore.ts';
+import { JobClassifier } from '../classification/JobClassifier.ts';
+import { ToolRouter } from '../routing/ToolRouter.ts';
+import { JobProcessor } from '../processing/JobProcessor.ts';
 
 export class AIQueueManager implements AIQueueController {
   private queueStore: AIQueueStore;
@@ -55,17 +58,10 @@ export class AIQueueManager implements AIQueueController {
     return this.hooksRegistry.registerHooks(hooks);
   }
 
-  /**
-   * Channel-agnostic entry point: Accepts any pre-normalized inbound event
-   * from any source adapter (Meta, Baileys, Telegram, GDrive, etc.).
-   */
   public enqueueNormalizedEvent(event: NormalizedInboundEvent): CustomerQueueItem {
     return this.handleIncomingFile(event.customerId, event.fileId, event.receivedAt);
   }
 
-  /**
-   * Primary entry point for routing an incoming customer file into session & queue.
-   */
   public handleIncomingFile(
     customerId: string,
     fileId: string,
@@ -75,30 +71,55 @@ export class AIQueueManager implements AIQueueController {
     const settings = this.settingsStore.getSettings();
 
     const existingItem = this.queueStore.getItem(customerId);
+    const isNewFile = !existingItem || !existingItem.fileIds.includes(fileId);
+
     const fileIds = existingItem && existingItem.jobSessionId === routeResult.jobSessionId
       ? (existingItem.fileIds.includes(fileId) ? existingItem.fileIds : [...existingItem.fileIds, fileId])
       : [fileId];
 
-    const expiresAt = this.timer.startOrResetTimer(
-      customerId,
-      routeResult.jobSessionId,
-      settings.customerCompletionWindowSeconds,
-      receivedAt
-    );
+    // Prevent resetting completed/active queue items unless a new file actually arrived
+    if (existingItem && !isNewFile && (
+      existingItem.state === 'AUTO_PROCESSING_COMPLETE' ||
+      existingItem.state === 'PROCESSING_ACTIVE' ||
+      existingItem.state === 'CANCELLED'
+    )) {
+      return existingItem;
+    }
+
+    const openedAt = existingItem && !routeResult.isNewSessionCreated
+      ? (existingItem.completionWindowOpenedAt || existingItem.enqueuedAt)
+      : receivedAt;
+
+    const expiresAt = existingItem && !routeResult.isNewSessionCreated && existingItem.completionWindowExpiresAt
+      ? existingItem.completionWindowExpiresAt
+      : this.timer.startOrResetTimer(
+          customerId,
+          routeResult.jobSessionId,
+          settings.customerCompletionWindowSeconds,
+          openedAt
+        );
 
     const newItem: CustomerQueueItem = {
       customerId,
       jobSessionId: routeResult.jobSessionId,
       priority: existingItem?.priority ?? 'normal',
-      enqueuedAt: existingItem && !routeResult.isNewSessionCreated ? existingItem.enqueuedAt : receivedAt,
-      state: 'WAITING_COMPLETION_WINDOW',
+      enqueuedAt: openedAt,
+      completionWindowOpenedAt: openedAt,
       completionWindowExpiresAt: expiresAt,
+      isSealed: false,
+      state: 'WAITING_COMPLETION_WINDOW',
+      processingState: 'waiting-completion',
       fileIds,
+      classification: existingItem?.classification,
+      route: existingItem?.route,
+      processingResult: existingItem?.processingResult,
+      updatedAt: Date.now(),
     };
 
     this.queueStore.upsertItem(newItem);
     this.persistQueueState();
 
+    console.log(`[AI Queue] File ${fileId} enqueued for customer ${customerId} (jobSessionId: ${newItem.jobSessionId}, filesCount: ${fileIds.length})`);
     this.eventEmitter.emit('COMPLETION_WINDOW_STARTED', {
       customerId,
       jobSessionId: routeResult.jobSessionId,
@@ -240,6 +261,9 @@ export class AIQueueManager implements AIQueueController {
       receivedAt: number;
       queuePosition: number;
       completionWindowRemainingSeconds: number;
+      classification?: CustomerQueueItem['classification'];
+      route?: CustomerQueueItem['route'];
+      processingResult?: CustomerQueueItem['processingResult'];
     }>;
   } {
     const fifoQueue = this.queueStore.getFifoQueue();
@@ -261,6 +285,9 @@ export class AIQueueManager implements AIQueueController {
       receivedAt: item.enqueuedAt,
       queuePosition: index + 1,
       completionWindowRemainingSeconds: this.timer.getTimerRemainingSeconds(item.customerId),
+      classification: item.classification,
+      route: item.route,
+      processingResult: item.processingResult,
     }));
 
     return {
@@ -270,6 +297,14 @@ export class AIQueueManager implements AIQueueController {
       activeBatchRevision,
       queuedCustomers,
     };
+  }
+
+  public getQueueItem(customerId: string): CustomerQueueItem | null {
+    return this.queueStore.getItem(customerId);
+  }
+
+  public getAllQueueItems(): CustomerQueueItem[] {
+    return this.queueStore.getAllItems();
   }
 
   private handleCompletionWindowExpired(customerId: string, jobSessionId: string): void {
@@ -338,7 +373,114 @@ export class AIQueueManager implements AIQueueController {
         startedAt: now,
       });
       this.hooksRegistry.notifyProcessingStart(nextItem.customerId, nextItem.jobSessionId);
+
+      // Execute End-to-End Classification, Routing, and Processing Pipeline
+      void this.executeJobPipeline(nextItem);
     }
+  }
+
+  private async executeJobPipeline(item: CustomerQueueItem): Promise<void> {
+    const customerId = item.customerId;
+    const jobSessionId = item.jobSessionId;
+
+    try {
+      // Step 1: Classification
+      console.log(`[AI Queue] Classification started for customer ${customerId}`);
+      this.updateProcessingState(customerId, 'classifying');
+
+      const customerInstructions = await this.fetchRecentCustomerInstructions(customerId, item.enqueuedAt);
+
+      const files = item.fileIds.map((id) => {
+        const ext = id.split('.').pop()?.toLowerCase() || '';
+        let mimeType = 'application/octet-stream';
+        if (ext === 'pdf') mimeType = 'application/pdf';
+        else if (['jpg', 'jpeg', 'png', 'webp', 'bmp'].includes(ext)) mimeType = `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+        return {
+          id,
+          name: id,
+          mimeType,
+        };
+      });
+
+      const classification = JobClassifier.classifyJobSession({
+        jobSessionId,
+        customerId,
+        files,
+        customerInstructions,
+      });
+
+      // Step 2: Tool Routing
+      this.updateProcessingState(customerId, 'routing');
+      const route = ToolRouter.routeJob(classification);
+      console.log(`[AI Queue] Route selected for customer ${customerId}: ${route.tool} (autoExecutable: ${route.autoExecutable})`);
+
+      // Step 3: Execution
+      this.updateProcessingState(customerId, 'processing');
+      const processingResult = await JobProcessor.processJob(
+        {
+          jobSessionId,
+          customerId,
+          fileSourceUrls: item.fileIds,
+        },
+        classification,
+        route
+      );
+
+      // Step 4: Save final result & transition state
+      const targetState: CustomerJobState = processingResult.status === 'failed' ? 'CANCELLED' : 'AUTO_PROCESSING_COMPLETE';
+      const targetProcState: Phase2JobProcessingState = processingResult.status === 'failed'
+        ? 'failed'
+        : processingResult.status === 'manual-review'
+        ? 'manual-review'
+        : 'ready-for-review';
+
+      const existing = this.queueStore.getItem(customerId);
+      if (existing) {
+        const updatedItem: CustomerQueueItem = {
+          ...existing,
+          state: targetState,
+          processingState: targetProcState,
+          isSealed: true,
+          classification,
+          route,
+          processingResult,
+          errorMessage: processingResult.error,
+          updatedAt: Date.now(),
+        };
+        this.queueStore.upsertItem(updatedItem);
+        this.persistQueueState();
+      }
+
+      const session = this.memoryStore.getJobSession(jobSessionId);
+      if (session) {
+        session.isSealed = true;
+        this.memoryStore.saveJobSession(session);
+      }
+
+      if (processingResult.status === 'failed') {
+        console.log(`[AI Queue] Processing failed for customer ${customerId}: ${processingResult.error}`);
+        this.failCustomerProcessing(customerId, jobSessionId, processingResult.error || 'Auto processing failed');
+      } else {
+        console.log(`[AI Queue] Processing completed for customer ${customerId}: ${processingResult.status}`);
+        this.completeCustomerProcessing(customerId, jobSessionId);
+      }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Pipeline execution error';
+      console.error(`[AI Queue] Processing failed for customer ${customerId}: ${errorMsg}`);
+      this.failCustomerProcessing(customerId, jobSessionId, errorMsg);
+    }
+  }
+
+  private updateProcessingState(customerId: string, procState: Phase2JobProcessingState): void {
+    const existing = this.queueStore.getItem(customerId);
+    if (!existing) return;
+    const updated: CustomerQueueItem = {
+      ...existing,
+      processingState: procState,
+      updatedAt: Date.now(),
+    };
+    this.queueStore.upsertItem(updated);
+    this.persistQueueState();
   }
 
   private persistQueueState(): void {
@@ -359,12 +501,41 @@ export class AIQueueManager implements AIQueueController {
       this.locks.restoreLocks(savedState.workerLock, savedState.customerLock);
     }
 
-    // Restore active completion window timers for items loaded from storage
     const allItems = this.queueStore.getAllItems();
+    const now = Date.now();
+
     allItems.forEach((item) => {
-      if (item.state === 'WAITING_COMPLETION_WINDOW' && item.completionWindowExpiresAt) {
-        this.timer.restoreTimer(item.customerId, item.jobSessionId, item.completionWindowExpiresAt);
+      if (item.state === 'WAITING_COMPLETION_WINDOW') {
+        const expiresAt = item.completionWindowExpiresAt || now;
+        this.timer.restoreTimer(item.customerId, item.jobSessionId, expiresAt);
       }
     });
+
+    // Clean up stale customer/worker locks if no active item is running
+    const hasActiveItem = allItems.some((i) => i.state === 'PROCESSING_ACTIVE');
+    if (!hasActiveItem) {
+      this.locks.releaseCustomerLock(savedState?.customerLock.customerId || '', savedState?.customerLock.jobSessionId || '');
+      this.locks.releaseWorkerLock('single-queue-worker');
+    }
+
+    // Automatically resume processing for any waiting or ready queue items
+    setTimeout(() => this.processNextInQueue(), 100);
+  }
+
+  private async fetchRecentCustomerInstructions(customerId: string, enqueuedAt: number): Promise<string[]> {
+    try {
+      const normId = customerId.startsWith('meta:') ? customerId : `meta:${customerId.replace(/^\+/, '')}`;
+      const response = await fetch(`http://127.0.0.1:3001/api/messages/${encodeURIComponent(normId)}`);
+      if (!response.ok) return [];
+      const chat: Array<{ id: string; text: string; direction: string; timestamp: number }> = await response.json();
+      if (!Array.isArray(chat)) return [];
+
+      const cutoff = Math.max(0, enqueuedAt - 15 * 60 * 1000);
+      return chat
+        .filter((m) => m.direction === 'incoming' && m.timestamp >= cutoff && typeof m.text === 'string')
+        .map((m) => m.text);
+    } catch {
+      return [];
+    }
   }
 }

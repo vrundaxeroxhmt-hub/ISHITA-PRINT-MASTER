@@ -23,3 +23,6 @@ export * from './queue/AIQueueManager.ts';
 export * from './queue/QueueLifecycleHooks.ts';
 export * from './queue/InboundJobSynchronizer.ts';
 export * from './adapters/MetaInboundAdapter.ts';
+export * from './classification/JobClassifier.ts';
+export * from './routing/ToolRouter.ts';
+export * from './processing/JobProcessor.ts';

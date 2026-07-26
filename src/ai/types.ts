@@ -141,6 +141,9 @@ export interface CustomerJobSessionMetadata {
   startedAt: number;
   firstFileReceivedAt: number;
   lastFileReceivedAt: number;
+  completionWindowOpenedAt?: number;
+  completionWindowClosesAt?: number;
+  isSealed?: boolean;
   sessionTimeoutMinutes: number;
   state: CustomerJobState;
   currentPdfRevision: number;
@@ -177,9 +180,35 @@ export interface AISettings {
   autoPrintEnabled: boolean;     // Default: false
   executionModePreference: AIExecutionMode;
 
+  // Ultra-HD Print Settings
+  defaultPhotoPrintDpi: number;       // Default: 300
+  defaultDocumentPrintDpi: number;    // Default: 300
+  highQualityPrintDpi: number;        // Default: 600
+  enableAIUpscaleWhenRequired: boolean; // Default: true
+  maximumUpscaleFactor: number;       // Default: 2
+  printJpegQuality: number;           // Default: 95
+  preserveOriginalResolution: boolean; // Default: true
+
   // Resource Concurrency Limits (LOCKED TO 1)
   customerConcurrency: number;
   workerConcurrency: number;
+}
+
+export interface ImagePrintQualityMetadata {
+  sourceFileId: string;
+  processingMasterId?: string;
+  previewFileId?: string;
+  printMasterId?: string;
+  pixelWidth: number;
+  pixelHeight: number;
+  printWidthInches?: number;
+  printHeightInches?: number;
+  effectiveDpi: number;
+  qualityStatus: 'Excellent' | 'Good' | 'Low Resolution' | 'AI Upscaled' | 'Upscaled';
+  upscaleApplied: boolean;
+  upscaleProvider?: string;
+  exportQuality: number;
+  operationsApplied: string[];
 }
 
 export interface NonDestructiveTransform {
@@ -228,6 +257,7 @@ export interface AIJobMemory {
 }
 
 export interface AIQueueController {
+  getEventEmitter?(): any;
   pause(): void;
   resume(): void;
   startProcessingNow(customerId: string): void;

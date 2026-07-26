@@ -1,6 +1,20 @@
 import type { CustomerJobState, QueuePriority } from '../types.ts';
+import type { AIJobClassification } from '../classification/JobClassifier.ts';
+import type { AIProcessingRoute } from '../routing/ToolRouter.ts';
+import type { AIProcessingResult } from '../processing/JobProcessor.ts';
 
 export type { CustomerJobState, QueuePriority };
+
+export type Phase2JobProcessingState =
+  | 'queued'
+  | 'waiting-completion'
+  | 'classifying'
+  | 'routing'
+  | 'processing'
+  | 'ready-for-review'
+  | 'manual-review'
+  | 'completed'
+  | 'failed';
 
 export interface WorkerLockMetadata {
   isLocked: boolean;
@@ -21,8 +35,16 @@ export interface CustomerQueueItem {
   priority: QueuePriority;
   enqueuedAt: number;
   state: CustomerJobState;
+  processingState?: Phase2JobProcessingState;
   completionWindowExpiresAt: number | null;
+  completionWindowOpenedAt?: number;
+  isSealed?: boolean;
   fileIds: string[];
+  classification?: AIJobClassification;
+  route?: AIProcessingRoute;
+  processingResult?: AIProcessingResult;
+  errorMessage?: string;
+  updatedAt?: number;
 }
 
 export interface QueueState {

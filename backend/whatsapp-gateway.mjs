@@ -8,6 +8,7 @@ import dns from "node:dns/promises";
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import sharp from "sharp";
 import makeWASocket, { Browsers, DisconnectReason, downloadMediaMessage, useMultiFileAuthState } from "@whiskeysockets/baileys";
 
 const appRoot = path.resolve(process.env.PRINTDESK_APP_ROOT || process.cwd());
@@ -18,8 +19,17 @@ const messagesFile = path.join(dataDir, "messages.json");
 const metaFile = path.join(dataDir, "meta-config.json");
 const jobsFile = path.join(dataDir, "jobs.json");
 const storageSettingsFile = path.join(dataDir, "storage-settings.json");
+const aiSettingsFile = path.join(dataDir, "ai-settings.json");
 let storageSettings = {};
 try { storageSettings = JSON.parse(await fs.readFile(storageSettingsFile, "utf8")); } catch {}
+let aiSettings = { completionWindowSeconds: 45 };
+try { aiSettings = JSON.parse(await fs.readFile(aiSettingsFile, "utf8")); } catch {}
+
+function getCompletionWindowSeconds() {
+  const sec = Number(aiSettings.completionWindowSeconds);
+  if (Number.isFinite(sec) && sec >= 10 && sec <= 300) return Math.round(sec);
+  return 45;
+}
 let filesDir = path.resolve(storageSettings.masterFolder || process.env.PRINTDESK_STORAGE_DIR || path.join(dataDir, "files"));
 const legacyFilesDir = path.join(dataDir, "files");
 const convertScript = path.join(appRoot, "backend", "convert-office.ps1");
@@ -195,16 +205,49 @@ async function addPrintableJob({ contactId, buffer, fileName, mimeType, timestam
   } else if (extension === ".pdf") kind = "pdf";
   const relativeFile = path.relative(filesDir, outputPath).split(path.sep).map(encodeURIComponent).join("/");
   const publicFile = `http://127.0.0.1:${port}/api/files/${relativeFile}`;
-  const printFile = { id: token, kind, name: outputName, thumbUrl: "", receivedAt: timestamp, status: "in_review", src: publicFile, originalFileId: originalFileId || undefined, sourceMessageId: sourceMessageId || undefined, source: sourceMessageId?.startsWith("meta:") ? "meta" : "baileys" };
-  const activeBatch = jobs
-    .filter((job) => job.customerId === contactId && job.status === "in_review" && !job.files?.some((file) => file.layoutType))
-    .sort((a, b) => b.lastAt - a.lastAt)
-    .find((job) => timestamp >= job.lastAt && timestamp - job.lastAt <= jobBatchWindowMs);
+  const printFile = {
+    id: token,
+    kind,
+    name: outputName,
+    thumbUrl: "",
+    receivedAt: timestamp,
+    status: "in_review",
+    src: publicFile,
+    originalFileId: originalFileId || undefined,
+    sourceMessageId: sourceMessageId || undefined,
+    source: sourceMessageId?.startsWith("meta:") ? "meta" : "baileys"
+  };
+  const now = timestamp || Date.now();
+  const windowSec = getCompletionWindowSeconds();
+  const windowMs = windowSec * 1000;
+  const activeBatch = jobs.find((job) => {
+    if (job.customerId !== contactId) return false;
+    if (job.isSealed || job.status !== "in_review") return false;
+    if (job.files?.some((file) => file.layoutType)) return false;
+    const openedAt = Number.isFinite(job.completionWindowOpenedAt) ? job.completionWindowOpenedAt : job.receivedAt;
+    const closesAt = Number.isFinite(job.completionWindowClosesAt) ? job.completionWindowClosesAt : (openedAt + windowMs);
+    return now < closesAt;
+  });
+
   if (activeBatch) {
     activeBatch.files.push(printFile);
-    activeBatch.lastAt = timestamp;
+    logger.info({ jobId: activeBatch.id, customerId: contactId, fileId: token }, "[GATEWAY] Appended file to active open job");
   } else {
-    jobs.unshift({ id: `job_${token}`, customerId: contactId, receivedAt: timestamp, lastAt: timestamp, files: [printFile], status: "in_review" });
+    const openedAt = now;
+    const closesAt = now + windowMs;
+    const newJob = {
+      id: `job_${token}`,
+      customerId: contactId,
+      receivedAt: now,
+      lastAt: now,
+      completionWindowOpenedAt: openedAt,
+      completionWindowClosesAt: closesAt,
+      isSealed: false,
+      files: [printFile],
+      status: "in_review"
+    };
+    jobs.unshift(newJob);
+    logger.info({ jobId: newJob.id, customerId: contactId, fileId: token, openedAt, closesAt }, "[GATEWAY] Created new Job Card for incoming file");
   }
   jobs = jobs.slice(0, 1000);
   await writeJson(jobsFile, jobs);
@@ -352,7 +395,132 @@ const localFileStaticOptions = (fallthrough) => ({
 app.use("/api/files", (req, res, next) => express.static(filesDir, localFileStaticOptions(true))(req, res, next));
 app.use("/api/files", express.static(legacyFilesDir, localFileStaticOptions(false)));
 
-app.get("/api/settings/storage", (_req, res) => res.json({ masterFolder: filesDir }));
+app.get("/api/settings/storage", (_req, res) => res.json({ masterFolder: filesDir, completionWindowSeconds: getCompletionWindowSeconds() }));
+app.get("/api/settings", (_req, res) => res.json({ completionWindowSeconds: getCompletionWindowSeconds() }));
+app.post("/api/settings", async (req, res, next) => {
+  try {
+    const { completionWindowSeconds } = req.body || {};
+    if (completionWindowSeconds !== undefined) {
+      const sec = Number(completionWindowSeconds);
+      if (!Number.isFinite(sec) || sec < 10 || sec > 300) {
+        return res.status(400).json({ error: "completionWindowSeconds must be between 10 and 300 seconds." });
+      }
+      aiSettings.completionWindowSeconds = Math.round(sec);
+      await writeJson(aiSettingsFile, aiSettings);
+    }
+    res.json({ ok: true, completionWindowSeconds: getCompletionWindowSeconds() });
+  } catch (error) { next(error); }
+});
+
+async function processImageFileWithSharp({ inputPath, outputPathPrefix, options = {} }) {
+  const metadata = await sharp(inputPath).metadata();
+  const width = metadata.width || 1920;
+  const height = metadata.height || 1080;
+
+  const targetDpi = options.targetDpi || 300;
+  const printWidthInches = width / targetDpi;
+  const printHeightInches = height / targetDpi;
+  const effectiveDpi = Math.round(Math.min(width / (printWidthInches || 1), height / (printHeightInches || 1)));
+
+  let qualityStatus = "Excellent";
+  if (effectiveDpi >= 300) qualityStatus = "Excellent";
+  else if (effectiveDpi >= 200) qualityStatus = "Good";
+  else qualityStatus = "Low Resolution";
+
+  let upscaleApplied = false;
+  let finalWidth = width;
+  let finalHeight = height;
+
+  if (qualityStatus === "Low Resolution" && options.enableUpscale) {
+    finalWidth = width * 2;
+    finalHeight = height * 2;
+    upscaleApplied = true;
+    qualityStatus = "Upscaled";
+  }
+
+  const masterPath = `${outputPathPrefix}_master.png`;
+  const printMasterPath = `${outputPathPrefix}_print_master.jpg`;
+  const previewPath = `${outputPathPrefix}_preview.jpg`;
+
+  let masterPipeline = sharp(inputPath)
+    .rotate()
+    .modulate({ brightness: 1.04, saturation: 1.04 })
+    .sharpen({ sigma: 1.0, m1: 0.5, m2: 2.0 });
+
+  if (upscaleApplied) {
+    masterPipeline = masterPipeline.resize(finalWidth, finalHeight, { kernel: "lanczos3" });
+  }
+
+  await masterPipeline.png().toFile(masterPath);
+
+  await sharp(masterPath)
+    .jpeg({ quality: 98, chromaSubsampling: "4:4:4" })
+    .withMetadata({ density: targetDpi })
+    .toFile(printMasterPath);
+
+  await sharp(masterPath)
+    .resize(Math.min(finalWidth, 1200), null, { fit: "inside" })
+    .jpeg({ quality: 85 })
+    .toFile(previewPath);
+
+  const masterStat = await fs.stat(masterPath);
+  const hash = crypto.createHash("sha256").update(await fs.readFile(inputPath)).digest("hex");
+
+  return {
+    sourceFileId: inputPath,
+    processingMasterId: masterPath,
+    previewFileId: previewPath,
+    printMasterId: printMasterPath,
+    pixelWidth: finalWidth,
+    pixelHeight: finalHeight,
+    effectiveDpi,
+    qualityStatus,
+    upscaleApplied,
+    upscaleProvider: upscaleApplied ? "Sharp-Lanczos3" : "None",
+    exportQuality: 98,
+    fileSize: masterStat.size,
+    sha256: hash,
+    operations: ["EXIF Auto-Orientation", "Exposure Boost", "Contrast & Saturation", "Edge-Preserving Sharpening", ...(upscaleApplied ? ["Lanczos3 Upscale 2x"] : [])]
+  };
+}
+
+app.post("/api/processing/process-image", async (req, res, next) => {
+  try {
+    const { sourceFileId, targetDpi, enableUpscale } = req.body || {};
+    if (!sourceFileId) return res.status(400).json({ error: "sourceFileId is required." });
+
+    let localPath = sourceFileId;
+    if (sourceFileId.startsWith("http")) {
+      const urlPath = new URL(sourceFileId).pathname;
+      const relative = decodeURIComponent(urlPath.replace("/api/files/", ""));
+      localPath = path.join(filesDir, relative);
+    }
+
+    const ext = path.extname(localPath);
+    const prefix = localPath.slice(0, -ext.length || localPath.length);
+
+    const result = await processImageFileWithSharp({
+      inputPath: localPath,
+      outputPathPrefix: prefix,
+      options: { targetDpi, enableUpscale }
+    });
+
+    const relPreview = path.relative(filesDir, result.previewFileId).split(path.sep).map(encodeURIComponent).join("/");
+    const relPrint = path.relative(filesDir, result.printMasterId).split(path.sep).map(encodeURIComponent).join("/");
+
+    const publicPreview = `http://127.0.0.1:${port}/api/files/${relPreview}`;
+    const publicPrint = `http://127.0.0.1:${port}/api/files/${relPrint}`;
+
+    res.json({
+      ok: true,
+      result: {
+        ...result,
+        previewUrl: publicPreview,
+        printMasterUrl: publicPrint
+      }
+    });
+  } catch (error) { next(error); }
+});
 app.post("/api/settings/storage/pick", async (_req, res, next) => {
   try {
     const script = "$shell=New-Object -ComObject Shell.Application;$folder=$shell.BrowseForFolder(0,'Select PrintDesk Master Save Folder',0,0);if($folder){$folder.Self.Path}";

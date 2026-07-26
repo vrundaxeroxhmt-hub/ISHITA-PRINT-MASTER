@@ -52,51 +52,65 @@ export class JobSessionRouter {
   public routeIncomingFile(request: RouteFileRequest): RouteFileResult {
     const receivedAt = request.receivedAt ?? Date.now();
     const settings = getAISettings();
+    const windowMs = (settings.customerCompletionWindowSeconds || 45) * 1000;
     const latestSession = this.memoryStore.getLatestCustomerJobSession(request.customerId);
 
-    // No existing session -> Create New Session
+    // Rule 1 — No existing session -> Create New Session
     if (!latestSession) {
-      return this.createNewSession(request.customerId, receivedAt, settings.customerJobSessionTimeoutMinutes);
+      console.log(`[JobSessionRouter] No existing session for ${request.customerId} -> Creating new session`);
+      return this.createNewSession(request.customerId, receivedAt, windowMs);
     }
 
     const state = latestSession.state;
 
-    // Rule 1 — Terminal Job always creates a new session
-    if (TERMINAL_STATES.has(state as TerminalCustomerJobState)) {
-      return this.createNewSession(request.customerId, receivedAt, settings.customerJobSessionTimeoutMinutes);
+    // Rule 2 — Explicitly Sealed Session or Terminal Job -> Create New Session
+    if (latestSession.isSealed === true || TERMINAL_STATES.has(state as TerminalCustomerJobState)) {
+      console.log(`[JobSessionRouter] Session ${latestSession.jobSessionId} is sealed/terminal -> Creating new session`);
+      return this.createNewSession(request.customerId, receivedAt, windowMs);
     }
 
-    // Rule 2 — Active Operational Job always keeps the same session (10m timeout bypassed)
-    if (ACTIVE_OPERATIONAL_STATES.has(state as ActiveOperationalJobState)) {
-      return this.appendToSession(latestSession, receivedAt);
+    // Rule 3 — Safe Completion Window Boundary Check
+    const openedAt = Number.isFinite(latestSession.completionWindowOpenedAt)
+      ? latestSession.completionWindowOpenedAt!
+      : latestSession.firstFileReceivedAt;
+
+    const closesAt = Number.isFinite(latestSession.completionWindowClosesAt)
+      ? latestSession.completionWindowClosesAt!
+      : (openedAt + windowMs);
+
+    if (receivedAt >= closesAt) {
+      console.log(`[JobSessionRouter] Window closed for session ${latestSession.jobSessionId} (receivedAt: ${receivedAt} >= closesAt: ${closesAt}) -> Creating new session`);
+      return this.createNewSession(request.customerId, receivedAt, windowMs);
     }
 
-    // Rule 3 — Timeout applies only to Pre-Processing Job States
-    if (PRE_PROCESSING_STATES.has(state as PreProcessingJobState)) {
-      const minutesSinceLastFile = (receivedAt - latestSession.lastFileReceivedAt) / (1000 * 60);
-      if (minutesSinceLastFile > settings.customerJobSessionTimeoutMinutes) {
-        return this.createNewSession(request.customerId, receivedAt, settings.customerJobSessionTimeoutMinutes);
-      }
-      return this.appendToSession(latestSession, receivedAt);
+    // Rule 4 — Active Operational / Complete Job outside collecting window -> Create New Session
+    if (ACTIVE_OPERATIONAL_STATES.has(state as ActiveOperationalJobState) && state !== 'COLLECTING_FILES' && state !== 'WAITING_COMPLETION_WINDOW') {
+      console.log(`[JobSessionRouter] Session ${latestSession.jobSessionId} is active/complete -> Creating new session`);
+      return this.createNewSession(request.customerId, receivedAt, windowMs);
     }
 
-    // Fallback: create new session
-    return this.createNewSession(request.customerId, receivedAt, settings.customerJobSessionTimeoutMinutes);
+    // Rule 5 — Inside active fixed completion window -> Append to open session
+    console.log(`[JobSessionRouter] Appending file ${request.fileId} to open session ${latestSession.jobSessionId}`);
+    return this.appendToSession(latestSession, receivedAt);
   }
 
   private createNewSession(
     customerId: string,
     receivedAt: number,
-    timeoutMinutes: number
+    windowMs: number
   ): RouteFileResult {
     const jobSessionId = createJobSessionId();
+    const closesAt = receivedAt + windowMs;
     const newSession: CustomerJobSessionMetadata = {
       jobSessionId,
       customerId,
       startedAt: receivedAt,
       firstFileReceivedAt: receivedAt,
       lastFileReceivedAt: receivedAt,
-      sessionTimeoutMinutes: timeoutMinutes,
+      completionWindowOpenedAt: receivedAt,
+      completionWindowClosesAt: closesAt,
+      isSealed: false,
+      sessionTimeoutMinutes: windowMs / (60 * 1000),
       state: 'COLLECTING_FILES',
       currentPdfRevision: 1,
       pdfRevisions: [],
@@ -122,7 +136,6 @@ export class JobSessionRouter {
       lastFileReceivedAt: Math.max(session.lastFileReceivedAt, receivedAt),
     };
 
-    // If job was already in a complete/review state, increment batch revision if needed
     if (session.state === 'AUTO_PROCESSING_COMPLETE' || session.state === 'IN_REVIEW') {
       updatedSession.currentPdfRevision = session.currentPdfRevision + 1;
     }

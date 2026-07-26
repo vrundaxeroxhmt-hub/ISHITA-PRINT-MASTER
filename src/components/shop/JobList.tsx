@@ -7,6 +7,7 @@ import { relTime } from "./utils";
 import { createBatchQualityPrintPdf, openPrintWindow, printPdfBytes } from "./printSingleFile";
 import { invertSelectedFiles } from "./bulkNegativeInvert";
 import { DateFilterDropdown, type DateFilterValue } from "./DateFilterDropdown";
+import { getDefaultAIManager } from "@/ai";
 
 export function JobList({
   customer,
@@ -41,6 +42,53 @@ export function JobList({
   const [uploading, setUploading] = useState(false);
   const [jobHistoryFilter, setJobHistoryFilter] = useState<DateFilterValue>("today");
   const [jobCustomDays, setJobCustomDays] = useState(7);
+  const [, setAiQueueRevision] = useState(0);
+
+  useEffect(() => {
+    const queueController = getDefaultAIManager().getQueueController();
+    const emitter = (queueController as any).getEventEmitter?.();
+    if (!emitter) return;
+    const events: Array<any> = [
+      'ITEM_ENQUEUED',
+      'ITEM_DEQUEUED',
+      'ITEM_STATE_CHANGED',
+      'COMPLETION_WINDOW_STARTED',
+      'COMPLETION_WINDOW_EXPIRED',
+      'PROCESSING_STARTED',
+      'PROCESSING_COMPLETED',
+      'PROCESSING_FAILED',
+    ];
+
+    const unsubscribes = events.map((evt) =>
+      emitter.on(evt, () => setAiQueueRevision((r) => r + 1))
+    );
+
+    const timer = setInterval(() => setAiQueueRevision((r) => r + 1), 1000);
+
+    return () => {
+      unsubscribes.forEach((unsub) => unsub());
+      clearInterval(timer);
+    };
+  }, []);
+
+  const findQueueItemForJob = (job: JobCard) => {
+    const queueController = getDefaultAIManager().getQueueController() as any;
+    if (!queueController) return null;
+
+    const allItems: any[] = queueController.getAllQueueItems?.() || queueController.queueStore?.getAllItems?.() || [];
+    if (!allItems.length) return null;
+
+    const jobFileIds = new Set(job.files.map((f) => f.id));
+    const fileMatch = allItems.find((item) => item.fileIds?.some((id: string) => jobFileIds.has(id)));
+    if (fileMatch) return fileMatch;
+
+    const normalize = (id: string) => id.replace(/^meta:/, '');
+    const targetCustIds = new Set<string>();
+    if (customer?.id) targetCustIds.add(normalize(customer.id));
+    if (job.customerId) targetCustIds.add(normalize(job.customerId));
+
+    return allItems.find((item) => targetCustIds.has(normalize(item.customerId))) || null;
+  };
   useEffect(() => {
     if (!customer) { setChat([]); return; }
     const load = () => fetch(`http://127.0.0.1:3001/api/messages/${encodeURIComponent(customer.id)}`).then((response) => response.ok ? response.json() : []).then(setChat).catch(() => {});
@@ -202,6 +250,49 @@ export function JobList({
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
+            {(() => {
+              const aiQueueItem = findQueueItemForJob(job);
+              if (!aiQueueItem) return null;
+              const isWaiting = aiQueueItem.state === 'WAITING_COMPLETION_WINDOW';
+              const category = aiQueueItem.classification?.category.toUpperCase() || (isWaiting ? 'WAITING' : 'CLASSIFYING');
+              const statusText = aiQueueItem.processingResult?.status || aiQueueItem.processingState || (isWaiting ? 'waiting-completion' : 'queued');
+              return (
+                <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-md border border-primary/20 bg-primary/5 p-1.5 text-[10px]">
+                  <Sparkles className="h-3 w-3 shrink-0 text-primary" />
+                  <span className="font-semibold text-primary">
+                    AI: {category}
+                  </span>
+                  {aiQueueItem.classification?.confidence && (
+                    <span className="text-[9px] text-muted-foreground font-mono">
+                      {Math.round(aiQueueItem.classification.confidence * 100)}%
+                    </span>
+                  )}
+                  <span className="rounded bg-background px-1 py-0.5 text-[9px] text-muted-foreground border border-border">
+                    Tool: {aiQueueItem.route?.tool || 'pending'}
+                  </span>
+                  <span className={`ml-auto rounded px-1.5 py-0.5 font-medium text-[9px] ${
+                    statusText === 'ready-for-review'
+                      ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                      : statusText === 'manual-review'
+                      ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                      : 'bg-primary/10 text-primary'
+                  }`}>
+                    {statusText}
+                  </span>
+                  <button
+                    onClick={() => {
+                      if (job.files[0]) {
+                        setExpandedJobs((cur) => new Set(cur).add(job.id));
+                        onSelectFile(job.files[0], job.id);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 rounded bg-primary px-2 py-0.5 text-[9px] font-medium text-primary-foreground hover:opacity-90"
+                  >
+                    Open for Review
+                  </button>
+                </div>
+              );
+            })()}
             {expandedJobs.has(job.id) && <><div className="mb-1 flex justify-end"><button onClick={()=>setPrintSelectedIds((current)=>{const next=new Set(current);const all=job.files.every((file)=>next.has(file.id));for(const file of job.files)all?next.delete(file.id):next.add(file.id);return next;})} className="text-[9px] text-primary hover:underline">{job.files.every((file)=>printSelectedIds.has(file.id))?"Clear job":"Select job for print"}</button></div><div className="grid grid-cols-3 gap-1.5">
               {job.files.map((f) => (
                 <FileThumb

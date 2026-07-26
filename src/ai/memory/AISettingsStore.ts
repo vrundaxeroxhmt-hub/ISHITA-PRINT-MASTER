@@ -21,6 +21,13 @@ export const DEFAULT_AI_SETTINGS: Readonly<AISettings> = {
   finalPdfAutoGenerate: true,
   autoPrintEnabled: false,
   executionModePreference: 'browser',
+  defaultPhotoPrintDpi: 300,
+  defaultDocumentPrintDpi: 300,
+  highQualityPrintDpi: 600,
+  enableAIUpscaleWhenRequired: true,
+  maximumUpscaleFactor: 2,
+  printJpegQuality: 95,
+  preserveOriginalResolution: true,
   customerConcurrency: 1,
   workerConcurrency: 1,
 };
