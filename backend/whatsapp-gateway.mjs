@@ -195,7 +195,7 @@ async function addPrintableJob({ contactId, buffer, fileName, mimeType, timestam
   } else if (extension === ".pdf") kind = "pdf";
   const relativeFile = path.relative(filesDir, outputPath).split(path.sep).map(encodeURIComponent).join("/");
   const publicFile = `http://127.0.0.1:${port}/api/files/${relativeFile}`;
-  const printFile = { id: token, kind, name: outputName, thumbUrl: "", receivedAt: timestamp, status: "in_review", src: publicFile, originalFileId: originalFileId || undefined, sourceMessageId: sourceMessageId || undefined };
+  const printFile = { id: token, kind, name: outputName, thumbUrl: "", receivedAt: timestamp, status: "in_review", src: publicFile, originalFileId: originalFileId || undefined, sourceMessageId: sourceMessageId || undefined, source: sourceMessageId?.startsWith("meta:") ? "meta" : "baileys" };
   const activeBatch = jobs
     .filter((job) => job.customerId === contactId && job.status === "in_review" && !job.files?.some((file) => file.layoutType))
     .sort((a, b) => b.lastAt - a.lastAt)

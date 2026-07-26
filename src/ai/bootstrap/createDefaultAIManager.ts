@@ -2,11 +2,14 @@ import { AIManager } from '../AIManager.ts';
 import { LocalVisionProvider } from '../providers/LocalVisionProvider.ts';
 import { LocalServiceVisionProvider } from '../providers/LocalServiceVisionProvider.ts';
 import { RemoteAPIVisionProvider } from '../providers/RemoteAPIVisionProvider.ts';
+import { AIQueueManager } from '../queue/AIQueueManager.ts';
+import { InboundJobSynchronizer } from '../queue/InboundJobSynchronizer.ts';
 
 let defaultInstance: AIManager | null = null;
+let defaultSynchronizer: InboundJobSynchronizer | null = null;
 
 /**
- * Creates and configures a new AIManager instance populated with default vision providers.
+ * Creates and configures a new AIManager instance populated with default vision providers and AIQueueManager.
  * Explicit bootstrap function without global import side effects.
  */
 export function createDefaultAIManager(): AIManager {
@@ -14,6 +17,7 @@ export function createDefaultAIManager(): AIManager {
   manager.registerVisionProvider(new LocalVisionProvider());
   manager.registerVisionProvider(new LocalServiceVisionProvider());
   manager.registerVisionProvider(new RemoteAPIVisionProvider());
+  manager.setQueueController(new AIQueueManager());
   return manager;
 }
 
@@ -26,6 +30,17 @@ export function getDefaultAIManager(): AIManager {
     defaultInstance = createDefaultAIManager();
   }
   return defaultInstance;
+}
+
+/**
+ * Returns a lazily instantiated singleton InboundJobSynchronizer instance.
+ */
+export function getInboundJobSynchronizer(): InboundJobSynchronizer {
+  if (!defaultSynchronizer) {
+    const queueManager = getDefaultAIManager().getQueueController() as AIQueueManager;
+    defaultSynchronizer = new InboundJobSynchronizer(queueManager);
+  }
+  return defaultSynchronizer;
 }
 
 /**

@@ -3,6 +3,7 @@ import type { OCRProvider } from './interfaces/OCRProvider.ts';
 import type { LLMProvider } from './interfaces/LLMProvider.ts';
 import type {
   AIExecutionMode,
+  AIQueueController,
   DocumentDetectionResult,
   DocumentPairingResult,
   ImageEnhancementOptions,
@@ -17,6 +18,7 @@ export class AIManager {
   private primaryVisionMode: AIExecutionMode = 'browser';
   private ocrProvider?: OCRProvider;
   private llmProvider?: LLMProvider;
+  private queueController?: AIQueueController;
 
   constructor(initialVisionProvider?: VisionProvider) {
     if (initialVisionProvider) {
@@ -51,6 +53,14 @@ export class AIManager {
 
   public getLLMProvider(): LLMProvider | undefined {
     return this.llmProvider;
+  }
+
+  public setQueueController(controller: AIQueueController): void {
+    this.queueController = controller;
+  }
+
+  public getQueueController(): AIQueueController | undefined {
+    return this.queueController;
   }
 
   /**

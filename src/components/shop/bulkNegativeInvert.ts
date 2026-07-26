@@ -1,9 +1,6 @@
 import { PDFDocument } from "pdf-lib";
-import * as pdfjsLib from "pdfjs-dist";
-import pdfWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { getPdfjsLib } from "@/lib/pdfjs";
 import type { PrintFile } from "@/lib/mock-data";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc as string;
 
 function invertPixels(context: CanvasRenderingContext2D, width: number, height: number) {
   const pixels = context.getImageData(0, 0, width, height);
@@ -24,6 +21,7 @@ async function invertImage(source: string) {
 }
 
 async function invertPdf(source: string) {
+  const pdfjsLib = await getPdfjsLib();
   const bytes = new Uint8Array(await (await fetch(source)).arrayBuffer());
   const input = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
   const output = await PDFDocument.create();

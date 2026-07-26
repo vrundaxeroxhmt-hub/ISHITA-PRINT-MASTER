@@ -1,10 +1,8 @@
 import { useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, CopyPlus, Layers, Minus, Plus, Sparkles } from "lucide-react";
-import * as pdfjsLib from "pdfjs-dist";
-import pdfWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { getPdfjsLib } from "@/lib/pdfjs";
 import type { PrintFile } from "@/lib/mock-data";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc as string;
 const PORTRAIT = { width: 2480, height: 3508 };
 const LANDSCAPE = { width: 3508, height: 2480 };
 export type MultiLayoutState = { sourceFileIds: string[]; copies: Record<string, number>; rows: number; columns: number; orientation: "portrait" | "landscape"; gap: number; keepSources?: boolean };
@@ -13,6 +11,7 @@ async function loadImage(src: string) { return await new Promise<HTMLImageElemen
 async function filePages(file: PrintFile) {
   const source=file.workingSrc || file.src || file.livePreview; if (!source) return [];
   if (file.kind === "image") { const image=await loadImage(source); const canvas=document.createElement("canvas"); canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;canvas.getContext("2d")!.drawImage(image,0,0);return [canvas]; }
+  const pdfjsLib = await getPdfjsLib();
   const pdf=await pdfjsLib.getDocument({data:new Uint8Array(await (await fetch(source)).arrayBuffer())}).promise; const result:HTMLCanvasElement[]=[];
   for(let index=1;index<=pdf.numPages;index++){const page=await pdf.getPage(index);const base=page.getViewport({scale:1});const viewport=page.getViewport({scale:3508/Math.max(base.width,base.height)});const canvas=document.createElement("canvas");canvas.width=Math.round(viewport.width);canvas.height=Math.round(viewport.height);await page.render({canvas,canvasContext:canvas.getContext("2d")!,viewport}).promise;result.push(canvas);} return result;
 }

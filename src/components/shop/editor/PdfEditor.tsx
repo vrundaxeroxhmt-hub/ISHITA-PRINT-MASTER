@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
-import * as pdfjsLib from "pdfjs-dist";
-import pdfWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { getPdfjsLib, type PDFDocumentProxy } from "@/lib/pdfjs";
 import {
   Trash2,
   RotateCw,
@@ -21,8 +20,6 @@ import type { PrintFile } from "@/lib/mock-data";
 import { PerspectiveCropDialog } from "./PerspectiveCropDialog";
 import { DEFAULT_PDF_ENHANCE, PdfPageEnhanceDialog, type PdfEnhanceSettings } from "./PdfPageEnhanceDialog";
 import { openPrintWindow, printPdfBytes } from "../printSingleFile";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc as string;
 
 type PageState = {
   id: string;
@@ -54,7 +51,7 @@ async function makeDemoPdf(name: string, pages: number): Promise<Uint8Array> {
   return await doc.save();
 }
 
-async function renderThumb(pdfDoc: pdfjsLib.PDFDocumentProxy, pageIdx: number, rotate: number): Promise<string> {
+async function renderThumb(pdfDoc: PDFDocumentProxy, pageIdx: number, rotate: number): Promise<string> {
   const page = await pdfDoc.getPage(pageIdx + 1);
   const viewport = page.getViewport({ scale: 0.35, rotation: rotate });
   const canvas = document.createElement("canvas");
@@ -66,7 +63,7 @@ async function renderThumb(pdfDoc: pdfjsLib.PDFDocumentProxy, pageIdx: number, r
 }
 
 async function renderPageForPerspective(
-  pdfDoc: pdfjsLib.PDFDocumentProxy,
+  pdfDoc: PDFDocumentProxy,
   pageIdx: number,
   rotate: number,
 ): Promise<string> {
@@ -82,7 +79,7 @@ async function renderPageForPerspective(
   return canvas.toDataURL("image/png");
 }
 
-async function processScanPage(pdfDoc: pdfjsLib.PDFDocumentProxy, pageIdx: number, rotate: number, settings: PdfEnhanceSettings) {
+async function processScanPage(pdfDoc: PDFDocumentProxy, pageIdx: number, rotate: number, settings: PdfEnhanceSettings) {
   const source = await renderPageForPerspective(pdfDoc, pageIdx, rotate);
   const img = new Image(); img.src = source; await img.decode();
   const left = Math.round(img.naturalWidth * settings.crop.left / 100);
@@ -124,9 +121,9 @@ export function PdfEditor({
   onSaveHandler?: (handler: (() => Promise<void>) | null) => void;
 }) {
   const [srcDocs, setSrcDocs] = useState<Uint8Array[]>([]);
-  const [srcRenderDocs, setSrcRenderDocs] = useState<pdfjsLib.PDFDocumentProxy[]>([]);
+  const [srcRenderDocs, setSrcRenderDocs] = useState<PDFDocumentProxy[]>([]);
   const srcDocsRef = useRef<Uint8Array[]>([]);
-  const srcRenderDocsRef = useRef<pdfjsLib.PDFDocumentProxy[]>([]);
+  const srcRenderDocsRef = useRef<PDFDocumentProxy[]>([]);
   const [pages, setPages] = useState<PageState[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -158,6 +155,7 @@ export function PdfEditor({
         : await makeDemoPdf(file.name, file.pages ?? 1);
       // Clone: pdfjs will detach the buffer, keep pdf-lib copy separate
       const forRender = bytes.slice();
+      const pdfjsLib = await getPdfjsLib();
       const rdoc = await pdfjsLib.getDocument({ data: forRender }).promise;
       if (cancelled) return;
       const initPages: PageState[] = [];
@@ -249,7 +247,7 @@ export function PdfEditor({
       const buf = new Uint8Array(await f.arrayBuffer());
       if (f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")) {
         const forRender = buf.slice();
-        const rdoc = await pdfjsLib.getDocument({ data: forRender }).promise;
+        const rdoc = await (await getPdfjsLib()).getDocument({ data: forRender }).promise;
         const docIdx = srcDocsRef.current.length;
         srcDocsRef.current = [...srcDocsRef.current, buf];
         srcRenderDocsRef.current = [...srcRenderDocsRef.current, rdoc];
@@ -275,7 +273,7 @@ export function PdfEditor({
         page.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
         const outBytes = await newDoc.save();
         const forRender = outBytes.slice();
-        const rdoc = await pdfjsLib.getDocument({ data: forRender }).promise;
+        const rdoc = await (await getPdfjsLib()).getDocument({ data: forRender }).promise;
         const docIdx = srcDocsRef.current.length;
         srcDocsRef.current = [...srcDocsRef.current, outBytes];
         srcRenderDocsRef.current = [...srcRenderDocsRef.current, rdoc];
@@ -330,7 +328,7 @@ export function PdfEditor({
       const page = newDoc.addPage([image.width, image.height]);
       page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
       const outBytes = await newDoc.save();
-      const rdoc = await pdfjsLib.getDocument({ data: outBytes.slice() }).promise;
+      const rdoc = await (await getPdfjsLib()).getDocument({ data: outBytes.slice() }).promise;
       const docIdx = srcDocsRef.current.length;
       const original = target.perspectiveOriginal ?? {
         srcDocIdx: target.srcDocIdx,

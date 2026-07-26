@@ -12,6 +12,7 @@ import type { MultiLayoutState } from "@/components/shop/editor/MultiPageLayout"
 import type { PassportLayoutState } from "@/components/shop/editor/PassportPhotoLayout";
 import { DateFilterDropdown, type DateFilterValue } from "@/components/shop/DateFilterDropdown";
 import type { PrintSettings } from "@/desktop-main";
+import { getInboundJobSynchronizer } from "@/ai";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -53,20 +54,23 @@ export function Index() {
     });
   }, []);
   useEffect(() => {
-    const loadJobs = () => fetch("http://127.0.0.1:3001/api/jobs").then((response) => response.ok ? response.json() : []).then((incoming: JobCard[]) => setJobs((current) => {
-      const currentFiles = new Map(current.flatMap((item) => item.files).map((file) => [file.id, file]));
-      return incoming.map((job) => ({
-        ...job,
-        files: job.files.map((file) => {
-          const existing = currentFiles.get(file.id);
-          return {
-            ...file,
-            livePreview: existing?.livePreview || file.workingSrc,
-            appliedCropSrc: existing?.appliedCropSrc || file.appliedCropSrc,
-          };
-        }),
-      }));
-    })).catch(() => {});
+    const loadJobs = () => fetch("http://127.0.0.1:3001/api/jobs").then((response) => response.ok ? response.json() : []).then((incoming: JobCard[]) => {
+      getInboundJobSynchronizer().synchronizeJobs(incoming);
+      setJobs((current) => {
+        const currentFiles = new Map(current.flatMap((item) => item.files).map((file) => [file.id, file]));
+        return incoming.map((job) => ({
+          ...job,
+          files: job.files.map((file) => {
+            const existing = currentFiles.get(file.id);
+            return {
+              ...file,
+              livePreview: existing?.livePreview || file.workingSrc,
+              appliedCropSrc: existing?.appliedCropSrc || file.appliedCropSrc,
+            };
+          }),
+        }));
+      });
+    }).catch(() => {});
     loadJobs();
     const timer = window.setInterval(loadJobs, 500);
     return () => window.clearInterval(timer);

@@ -147,7 +147,7 @@ export function PassportPhotoLayout({
   const cropDown = (event: React.PointerEvent<HTMLDivElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
     dragStart.current = cropPoint(event);
-    patchConfig({ crop: { ...cropPoint(event), width: 0, height: 0 } });
+    const point = cropPoint(event); patchConfig({ crop: { left: point.x, top: point.y, width: 0, height: 0 } });
   };
   const cropMove = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!dragStart.current) return;
@@ -835,3 +835,4 @@ export function PassportPhotoLayout({
     </div>
   );
 }
+
