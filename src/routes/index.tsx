@@ -17,9 +17,9 @@ import { getInboundJobSynchronizer } from "@/ai";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "PrintDesk — WhatsApp Xerox Automation" },
+      { title: "SMART PRINT" },
       { name: "description", content: "Automate WhatsApp print jobs: customer batching, image & PDF editing, Aadhaar 130% layout, direct print." },
-      { property: "og:title", content: "PrintDesk — WhatsApp Xerox Automation" },
+      { property: "og:title", content: "SMART PRINT" },
       { property: "og:description", content: "Automate WhatsApp print jobs: customer batching, image & PDF editing, Aadhaar 130% layout, direct print." },
     ],
   }),
@@ -65,6 +65,19 @@ export function Index() {
   useEffect(() => { localStorage.setItem("printdesk.customerNameFontSize", String(customerNameFontSize)); }, [customerNameFontSize]);
   useEffect(() => { localStorage.setItem("printdesk.customerMobileFontSize", String(customerMobileFontSize)); }, [customerMobileFontSize]);
   useEffect(() => { fetch("http://127.0.0.1:3001/api/settings/storage").then((response)=>response.json()).then((result)=>setMasterFolder(result.masterFolder||"")).catch(()=>{}); }, []);
+  const selectMasterFolder = async () => {
+    if (folderBusy) return;
+    setFolderBusy(true);
+    try {
+      if (!window.printDeskDesktop?.selectSaveFolder) throw new Error("Folder selection is available only in the SMART PRINT desktop application.");
+      const selected = await window.printDeskDesktop.selectSaveFolder();
+      if (selected.cancelled || !selected.folder) return;
+      const response = await fetch("http://127.0.0.1:3001/api/settings/storage", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ masterFolder: selected.folder }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Folder selection failed");
+      setMasterFolder(result.masterFolder || selected.folder);
+    } finally { setFolderBusy(false); }
+  };
   useEffect(() => { window.printDeskDesktop?.getPrintSettings().then((result)=>{setPrintSettings(result.settings);setPrinters(result.printers||[]);}); }, []);
   const updatePrintSettings = (patch: Partial<PrintSettings>) => { const next={...printSettings,...patch};setPrintSettings(next);void window.printDeskDesktop?.setPrintSettings(next); };
   const handleLiveContacts = useCallback((live: unknown[]) => {
@@ -254,8 +267,8 @@ export function Index() {
             <Printer className="h-4 w-4" />
           </div>
           <div>
-            <h1 className="text-sm font-bold leading-tight">ISHTA PRINT MASTER</h1>
-            <p className="text-[10px] leading-tight text-muted-foreground">WhatsApp Xerox Automation</p>
+            <h1 className="text-sm font-bold leading-tight">SMART PRINT</h1>
+            <p className="text-[10px] leading-tight text-muted-foreground">IM TECHNOLOGY</p>
           </div>
         </div>
         <WhatsAppConnections onContacts={handleLiveContacts} />
@@ -305,7 +318,7 @@ export function Index() {
                   </select>
                 </div>
               </div>
-              <div className="mt-4 border-t border-border pt-3"><div className="text-[10px] font-semibold">Master Save Folder</div><p className="mt-0.5 text-[9px] text-muted-foreground">Files save inside Year / Month / Date / Mobile / Batch_Time</p><div className="mt-2 break-all rounded border border-border bg-background/60 p-2 text-[9px] text-muted-foreground">{masterFolder || "Not configured"}</div><button disabled={folderBusy} onClick={async()=>{setFolderBusy(true);try{const response=await fetch("http://127.0.0.1:3001/api/settings/storage/pick",{method:"POST"});const result=await response.json();if(!response.ok)throw new Error(result.error||"Folder selection failed");if(result.masterFolder)setMasterFolder(result.masterFolder);}finally{setFolderBusy(false);}}} className="mt-2 w-full rounded bg-primary py-1.5 text-[10px] text-primary-foreground disabled:opacity-50">{folderBusy?"Opening Folder Picker...":"Browse & Select Master Folder"}</button></div>
+              <div className="mt-4 border-t border-border pt-3"><div className="text-[10px] font-semibold">Master Save Folder</div><p className="mt-0.5 text-[9px] text-muted-foreground">Files save inside Year / Month / Date / Mobile / Batch_Time</p><div className="mt-2 break-all rounded border border-border bg-background/60 p-2 text-[9px] text-muted-foreground">{masterFolder || "Not configured"}</div><button disabled={folderBusy} onClick={()=>void selectMasterFolder()} className="mt-2 w-full rounded bg-primary py-1.5 text-[10px] text-primary-foreground disabled:opacity-50">{folderBusy?"Opening Folder Picker...":"Browse & Select Master Folder"}</button></div>
             </div>}
           </div>
         </div>

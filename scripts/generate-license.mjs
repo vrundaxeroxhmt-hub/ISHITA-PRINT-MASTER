@@ -11,7 +11,7 @@ else if (args.months) validityDays = Number(args.months) * 30;
 else if (args.years) validityDays = Number(args.years) * 365;
 if (validityDays !== null && (!Number.isFinite(validityDays) || validityDays <= 0)) throw new Error("Validity must be a positive number.");
 const expiresAt = validityDays === null ? null : new Date(Date.now() + validityDays * 86400000).toISOString();
-const payload = { product: "ISHTA PRINT MASTER", machine: String(args.machine).replace(/\s+/g, "").toUpperCase(), customer: String(args.customer || "Licensed Customer"), issuedAt, expiresAt };
+const payload = { product: "SMART PRINT", machine: String(args.machine).replace(/\s+/g, "").toUpperCase(), customer: String(args.customer || "Licensed Customer"), issuedAt, expiresAt };
 const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
 const privateKey = fs.readFileSync(path.join(process.cwd(), ".license-private", "license-private.pem"), "utf8");
 const signature = crypto.sign(null, Buffer.from(encoded), privateKey).toString("base64url");

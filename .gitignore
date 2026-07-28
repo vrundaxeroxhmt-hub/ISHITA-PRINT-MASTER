@@ -40,3 +40,8 @@ desktop-dist/
 
 *.exe
 *.exe.blockmap
+release-final/
+dist/
+dist-electron/
+*.asar
+*.exe

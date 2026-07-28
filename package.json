@@ -1,8 +1,8 @@
 {
-  "name": "tanstack_start_ts",
+  "name": "smart-print",
   "version": "1.0.0",
-  "description": "ISHTA PRINT MASTER WhatsApp print-shop automation for Windows",
-  "author": "Maharshi PrintMaster",
+  "description": "SMART PRINT commercial Windows desktop application",
+  "author": "IM TECHNOLOGY",
   "private": true,
   "main": "electron/main.cjs",
   "sideEffects": false,
@@ -108,8 +108,9 @@
     "vite": "^8.0.16"
   },
   "build": {
-    "appId": "in.maharshi.printdesk",
-    "productName": "ISHTA PRINT MASTER",
+    "appId": "in.imtechnology.smartprint",
+    "productName": "SMART PRINT",
+    "copyright": "© IM TECHNOLOGY",
     "asar": true,
     "asarUnpack": [
       "backend/**/*"
@@ -118,6 +119,16 @@
     "directories": {
       "output": "release"
     },
+    "extraResources": [
+      {
+        "from": "assets/app.ico",
+        "to": "app.ico"
+      },
+      {
+        "from": "electron/convert-office.ps1",
+        "to": "convert-office.ps1"
+      }
+    ],
     "files": [
       "desktop-dist/**/*",
       "electron/**/*",
@@ -126,13 +137,17 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "public/favicon.ico"
+      "icon": "assets/app.ico",
+      "artifactName": "SMART PRINT Setup.exe"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "shortcutName": "SMART PRINT",
+      "include": "electron/installer.nsh",
+      "deleteAppDataOnUninstall": false
     }
   }
 }

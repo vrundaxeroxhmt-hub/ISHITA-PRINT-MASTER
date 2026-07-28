@@ -3,11 +3,10 @@ import cors from "cors";
 import QRCode from "qrcode";
 import pino from "pino";
 import fs from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import dns from "node:dns/promises";
 import crypto from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import sharp from "sharp";
 import makeWASocket, { Browsers, DisconnectReason, downloadMediaMessage, useMultiFileAuthState } from "@whiskeysockets/baileys";
 
@@ -30,10 +29,11 @@ function getCompletionWindowSeconds() {
   if (Number.isFinite(sec) && sec >= 10 && sec <= 300) return Math.round(sec);
   return 45;
 }
-let filesDir = path.resolve(storageSettings.masterFolder || process.env.PRINTDESK_STORAGE_DIR || path.join(dataDir, "files"));
+let masterRootFolder = storageSettings.masterRootFolder ? path.resolve(storageSettings.masterRootFolder) : "";
+let filesDir = path.resolve(masterRootFolder ? path.join(masterRootFolder, "Files") : storageSettings.masterFolder || process.env.PRINTDESK_STORAGE_DIR || path.join(dataDir, "files"));
 const legacyFilesDir = path.join(dataDir, "files");
-const convertScript = path.join(appRoot, "backend", "convert-office.ps1");
-const port = Number(process.env.WHATSAPP_GATEWAY_PORT || 3001);
+const port = Number(process.env.WHATSAPP_GATEWAY_PORT);
+if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("WHATSAPP_GATEWAY_PORT must be assigned by the desktop application.");
 const jobBatchWindowMs = 10 * 60 * 1000;
 const logger = pino({ level: process.env.WHATSAPP_LOG_LEVEL || "warn" });
 await fs.mkdir(dataDir, { recursive: true });
@@ -42,7 +42,24 @@ if (!storageSettings.masterFolder && process.env.PRINTDESK_STORAGE_DIR) {
   storageSettings = { ...storageSettings, masterFolder: filesDir };
   await fs.writeFile(storageSettingsFile, JSON.stringify(storageSettings, null, 2), "utf8");
 }
-const execFileAsync = promisify(execFile);
+const desktopRequests = new Map();
+process.parentPort?.on("message", (event) => {
+  const message = event?.data || event;
+  const pending = desktopRequests.get(message?.requestId);
+  if (!pending) return;
+  desktopRequests.delete(message.requestId);
+  if (message.ok) pending.resolve(message.result);
+  else pending.reject(new Error(message.error || "Desktop operation failed."));
+});
+function requestDesktop(action, payload) {
+  if (!process.parentPort) return Promise.reject(new Error(`${action} is available only inside the SMART PRINT desktop application.`));
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { desktopRequests.delete(requestId); reject(new Error(`${action} timed out.`)); }, 130000);
+    desktopRequests.set(requestId, { resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: (error) => { clearTimeout(timer); reject(error); } });
+    process.parentPort.postMessage({ requestId, action, payload });
+  });
+}
 
 async function readJson(file, fallback) { try { return JSON.parse(await fs.readFile(file, "utf8")); } catch (error) { logger.error({ file, error }, "Could not read JSON data file"); return fallback; } }
 async function writeJson(file, value) {
@@ -200,7 +217,7 @@ async function addPrintableJob({ contactId, buffer, fileName, mimeType, timestam
   if (officeExtensions.has(extension)) {
     outputName = `${path.basename(originalName, extension)}.pdf`;
     outputPath = path.join(targetFolder, `${token}_${path.basename(originalName, extension)}.pdf`);
-    await execFileAsync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", convertScript, "-InputPath", sourcePath, "-OutputPath", outputPath], { timeout: 120000, windowsHide: true });
+    await requestDesktop("convert-office", { inputPath: sourcePath, outputPath });
     kind = "pdf";
   } else if (extension === ".pdf") kind = "pdf";
   const relativeFile = path.relative(filesDir, outputPath).split(path.sep).map(encodeURIComponent).join("/");
@@ -307,7 +324,7 @@ async function startBaileys(force = false) {
   socket = makeWASocket({
     auth: state,
     logger,
-    browser: Browsers.windows("PrintDesk"),
+    browser: Browsers.windows("SMART PRINT"),
     printQRInTerminal: false,
     markOnlineOnConnect: false,
     syncFullHistory: false,
@@ -395,7 +412,23 @@ const localFileStaticOptions = (fallthrough) => ({
 app.use("/api/files", (req, res, next) => express.static(filesDir, localFileStaticOptions(true))(req, res, next));
 app.use("/api/files", express.static(legacyFilesDir, localFileStaticOptions(false)));
 
-app.get("/api/settings/storage", (_req, res) => res.json({ masterFolder: filesDir, completionWindowSeconds: getCompletionWindowSeconds() }));
+app.get("/api/health", (_req, res) => res.json({ ok: true }));
+app.get("/api/settings/storage", (_req, res) => res.json({ masterFolder: masterRootFolder || filesDir, completionWindowSeconds: getCompletionWindowSeconds() }));
+app.post("/api/settings/storage", async (req, res, next) => {
+  try {
+    const selected = String(req.body?.masterFolder || "").trim();
+    if (!selected || !path.isAbsolute(selected)) return res.status(400).json({ error: "Select a valid absolute folder path." });
+    const resolved = path.resolve(selected);
+    const requiredFolders = ["Customers", "Jobs", "Files", "Images", "PDF", "Exports", "WhatsApp", "Logs", "Temp", "License"];
+    await Promise.all(requiredFolders.map((folder) => fs.mkdir(path.join(resolved, folder), { recursive: true })));
+    await fs.access(resolved, fsConstants.W_OK);
+    masterRootFolder = resolved;
+    filesDir = path.join(resolved, "Files");
+    storageSettings = { ...storageSettings, masterRootFolder: resolved, masterFolder: filesDir };
+    await fs.writeFile(storageSettingsFile, JSON.stringify(storageSettings, null, 2), "utf8");
+    res.json({ ok: true, masterFolder: masterRootFolder });
+  } catch (error) { next(error); }
+});
 app.get("/api/settings", (_req, res) => res.json({ completionWindowSeconds: getCompletionWindowSeconds() }));
 app.post("/api/settings", async (req, res, next) => {
   try {
@@ -521,21 +554,6 @@ app.post("/api/processing/process-image", async (req, res, next) => {
     });
   } catch (error) { next(error); }
 });
-app.post("/api/settings/storage/pick", async (_req, res, next) => {
-  try {
-    const script = "$shell=New-Object -ComObject Shell.Application;$folder=$shell.BrowseForFolder(0,'Select PrintDesk Master Save Folder',0,0);if($folder){$folder.Self.Path}";
-    const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-STA", "-Command", script], { windowsHide: false });
-    const selected = stdout.trim();
-    if (!selected) return res.json({ cancelled: true, masterFolder: filesDir });
-    const resolved = path.resolve(selected);
-    await fs.mkdir(resolved, { recursive: true });
-    filesDir = resolved;
-    storageSettings = { ...storageSettings, masterFolder: resolved };
-    await fs.writeFile(storageSettingsFile, JSON.stringify(storageSettings, null, 2), "utf8");
-    res.json({ ok: true, masterFolder: filesDir });
-  } catch (error) { next(error); }
-});
-
 app.post("/api/jobs/manual-upload", async (req, res, next) => {
   try {
     const { contactId, fileName, mimeType, dataUrl } = req.body || {};
@@ -772,8 +790,7 @@ app.post("/api/jobs/files/:fileId/open-default", async (req, res, next) => {
     const localPath = await storedPathFromUrl(file.src);
     if (!localPath) return res.status(404).json({ error: "Local file was not found." });
     await fs.access(localPath);
-    const script = "param([string]$p);$info=New-Object System.Diagnostics.ProcessStartInfo;$info.FileName=$p;$info.UseShellExecute=$true;[System.Diagnostics.Process]::Start($info)|Out-Null";
-    await execFileAsync("powershell.exe", ["-NoProfile", "-Command", script, localPath], { windowsHide: true });
+    await requestDesktop("open-path", { filePath: localPath });
     res.json({ ok: true });
   } catch (error) { next(error); }
 });
