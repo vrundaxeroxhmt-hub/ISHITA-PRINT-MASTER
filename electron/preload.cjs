@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("printDeskDesktop", {
   completeSetup: (folder) => ipcRenderer.invoke("setup:complete", folder),
   selectSaveFolder: () => ipcRenderer.invoke("storage:select-folder"),
   getLicense: () => ipcRenderer.invoke("license:get"),
+  selectLicenseFile: () => ipcRenderer.invoke("license:select-file"),
   activateLicense: (key) => ipcRenderer.invoke("license:activate", key),
   printPdf: (base64) => ipcRenderer.invoke("print:pdf", base64),
   getPrintSettings: () => ipcRenderer.invoke("print:get-settings"),

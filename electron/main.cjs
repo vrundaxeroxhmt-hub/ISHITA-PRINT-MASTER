@@ -92,9 +92,14 @@ function machineCode() {
   return crypto.createHash("sha256").update(seed).digest("hex").slice(0, 20).toUpperCase();
 }
 
+function normalizeLicenseKey(value) {
+  const compact = String(value || "").replace(/\s+/g, "");
+  return compact.match(/PD1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/)?.[0] || compact;
+}
+
 function validateLicense(key) {
   try {
-    const [prefix, encoded, signature] = String(key).replace(/\s+/g, "").split(".");
+    const [prefix, encoded, signature] = normalizeLicenseKey(key).split(".");
     if (prefix !== "PD1" || !encoded || !signature) throw new Error("Invalid licence format.");
     const publicKey = fs.readFileSync(path.join(__dirname, "license-public.pem"), "utf8");
     if (!crypto.verify(null, Buffer.from(encoded), publicKey, Buffer.from(signature, "base64url"))) throw new Error("Licence signature is invalid.");
@@ -146,7 +151,7 @@ function waitForGateway(port, timeoutMs = 30000) {
 
 async function startGateway() {
   if (gatewayProcess) return;
-  gatewayPort = await findFreePort();
+  if (!gatewayPort) gatewayPort = await findFreePort();
   const runtimeRoot = app.isPackaged ? path.join(process.resourcesPath, "app.asar.unpacked") : appRoot();
   // Keep the module URL inside app.asar so ESM resolves packaged dependencies
   // from app.asar/node_modules. Electron transparently reads this entry from
@@ -224,12 +229,22 @@ ipcMain.handle("storage:select-folder", async () => {
 });
 ipcMain.handle("setup:complete", (_event, folder) => { const root = path.resolve(String(folder)); createDataFolders(root); writeJson(setupPath(), { masterFolder: root, completedAt: new Date().toISOString() }); return { ok: true, masterFolder: root }; });
 ipcMain.handle("license:get", () => readEntitlement());
-ipcMain.handle("license:activate", (_event, key) => {
-  const value = String(key || "").replace(/\s+/g, "");
+ipcMain.handle("license:select-file", async () => {
+  const owner = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+  const result = await dialog.showOpenDialog(owner, { title: "Select SMART PRINT License", buttonLabel: "Load License", filters: [{ name: "SMART PRINT License", extensions: ["lic"] }, { name: "Text files", extensions: ["txt"] }], properties: ["openFile"] });
+  if (result.canceled || !result.filePaths[0]) return { cancelled: true };
+  try { return { ok: true, key: fs.readFileSync(result.filePaths[0], "utf8"), fileName: path.basename(result.filePaths[0]) }; }
+  catch (error) { return { ok: false, error: error.message || "The license file could not be read." }; }
+});
+ipcMain.handle("license:activate", async (_event, key) => {
+  const value = normalizeLicenseKey(key);
   const validation = validateLicense(value);
   if (validation.error) return { ok: false, error: validation.error };
   fs.mkdirSync(path.dirname(licensePath()), { recursive: true }); fs.writeFileSync(licensePath(), value, "utf8");
-  if (!gatewayProcess) startGateway().catch((error) => log(`Gateway activation start failed: ${error.message}`));
+  if (!gatewayProcess) {
+    try { await startGateway(); }
+    catch (error) { log(`Gateway activation start failed: ${error.message}`); return { ok: false, error: `License activated, but the SMART PRINT backend could not start: ${error.message}` }; }
+  }
   return { ok: true, ...readEntitlement() };
 });
 ipcMain.handle("print:get-settings", async () => ({ settings: readPrintSettings(), printers: await mainWindow.webContents.getPrintersAsync() }));
@@ -254,6 +269,7 @@ else {
     log(`Application startup version=${app.getVersion()} resources=${process.resourcesPath} userData=${app.getPath("userData")}`);
     fs.mkdirSync(userDataDir(), { recursive: true });
     terminateOwnedGatewayTree("stale startup cleanup");
+    gatewayPort = await findFreePort();
     if (readEntitlement().active) { try { await startGateway(); } catch (error) { gatewayStartupError = error.message; log(`Gateway startup failed: ${error.message}`); dialog.showErrorBox(`${PRODUCT_NAME} Startup Error`, error.message); } }
     createWindow();
   });

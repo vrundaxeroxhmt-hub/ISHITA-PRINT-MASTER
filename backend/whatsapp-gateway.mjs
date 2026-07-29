@@ -8,7 +8,7 @@ import path from "node:path";
 import dns from "node:dns/promises";
 import crypto from "node:crypto";
 import sharp from "sharp";
-import makeWASocket, { Browsers, DisconnectReason, downloadMediaMessage, useMultiFileAuthState } from "@whiskeysockets/baileys";
+import makeWASocket, { Browsers, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, useMultiFileAuthState } from "@whiskeysockets/baileys";
 
 const appRoot = path.resolve(process.env.PRINTDESK_APP_ROOT || process.cwd());
 const dataDir = path.resolve(process.env.PRINTDESK_DATA_DIR || path.join(appRoot, ".whatsapp-data"));
@@ -67,6 +67,14 @@ async function writeJson(file, value) {
   await fs.writeFile(temporary, JSON.stringify(value, null, 2), "utf8");
   await fs.rename(temporary, file);
 }
+async function readMetaConfig() {
+  try { return JSON.parse(await fs.readFile(metaFile, "utf8")); }
+  catch (error) {
+    if (error?.code !== "ENOENT") logger.error({ file: metaFile, error }, "Could not read Meta configuration");
+    await writeJson(metaFile, {});
+    return {};
+  }
+}
 
 let contacts = await readJson(contactsFile, {});
 let messages = await readJson(messagesFile, {});
@@ -96,7 +104,7 @@ function mergeLegacyEditedJobs() {
   }
 }
 mergeLegacyEditedJobs();
-let metaConfig = await readJson(metaFile, {});
+let metaConfig = await readMetaConfig();
 let socket;
 let reconnectTimer;
 let manuallyLoggedOut = false;
@@ -321,8 +329,11 @@ async function startBaileys(force = false) {
   manuallyLoggedOut = false;
   baileys = { ...baileys, state: "connecting", qr: null, error: null };
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
-  socket = makeWASocket({
+  const { version } = await fetchLatestBaileysVersion({ timeoutMs: 10000 });
+  logger.warn({ version: version.join(".") }, "Using current WhatsApp Web version");
+  const currentSocket = makeWASocket({
     auth: state,
+    version,
     logger,
     browser: Browsers.windows("SMART PRINT"),
     printQRInTerminal: false,
@@ -330,14 +341,24 @@ async function startBaileys(force = false) {
     syncFullHistory: false,
     getMessage: async () => undefined,
   });
-  socket.ev.on("creds.update", saveCreds);
-  socket.ev.on("connection.update", async ({ connection, lastDisconnect, qr }) => {
-    if (qr) baileys = { ...baileys, state: "qr", qr: await QRCode.toDataURL(qr), error: null };
+  socket = currentSocket;
+  let hasGeneratedQr = false;
+  currentSocket.ev.on("creds.update", saveCreds);
+  currentSocket.ev.on("connection.update", async ({ connection, lastDisconnect, qr }) => {
+    if (socket !== currentSocket) return;
+    const closeReason = lastDisconnect?.error?.output?.statusCode || lastDisconnect?.error?.message || null;
+    const eventName = qr ? (hasGeneratedQr ? "QR Updated" : "QR Generated") : connection === "open" ? "Connected" : connection === "close" ? "Connection Closed" : "Connecting";
+    logger.warn({ connection: connection || null, hasQr: Boolean(qr), closeReason, lastDisconnect: lastDisconnect || null }, eventName);
+    if (qr) {
+      hasGeneratedQr = true;
+      try { baileys = { ...baileys, state: "qr", qr: await QRCode.toDataURL(qr), error: null }; }
+      catch (error) { baileys = { ...baileys, state: "error", qr: null, error: error.message || "QR generation failed." }; }
+    }
     if (connection === "open") {
-      const id = jidToNumber(socket.user?.id);
+      const id = jidToNumber(currentSocket.user?.id);
       let avatarUrl;
-      try { avatarUrl = await socket.profilePictureUrl(socket.user.id, "image"); } catch {}
-      baileys = { state: "connected", qr: null, error: null, user: { name: socket.user?.name || "WhatsApp", number: id ? `+${id}` : "", avatarUrl } };
+      try { avatarUrl = await currentSocket.profilePictureUrl(currentSocket.user.id, "image"); } catch {}
+      baileys = { state: "connected", qr: null, error: null, user: { name: currentSocket.user?.name || "WhatsApp", number: id ? `+${id}` : "", avatarUrl } };
     }
     if (connection === "close") {
       const code = lastDisconnect?.error?.output?.statusCode;
@@ -346,7 +367,7 @@ async function startBaileys(force = false) {
       if (!loggedOut && !manuallyLoggedOut) reconnectTimer = setTimeout(() => startBaileys(true), 3000);
     }
   });
-  socket.ev.on("messages.upsert", async ({ messages }) => {
+  currentSocket.ev.on("messages.upsert", async ({ messages }) => {
     for (const message of messages) {
       const primaryJid = message.key.remoteJid;
       const alternateJid = message.key.remoteJidAlt;
@@ -366,7 +387,7 @@ async function startBaileys(force = false) {
       // Make the new customer visible immediately. Profile-picture lookup is a
       // network request and can take several seconds (or time out entirely).
       await upsertContact({ id: number, name: message.pushName, source: "baileys", timestamp });
-      void socket.profilePictureUrl(phoneJid || primaryJid, "preview").then(async (avatarUrl) => {
+      void currentSocket.profilePictureUrl(phoneJid || primaryJid, "preview").then(async (avatarUrl) => {
         const contact = contacts[contactId];
         if (!contact || !avatarUrl || contact.avatarUrl === avatarUrl) return;
         contact.avatarUrl = avatarUrl;
@@ -384,6 +405,32 @@ async function startBaileys(force = false) {
       } catch (error) { logger.warn({ error }, "Baileys printable media processing failed"); }
     }
   });
+}
+
+async function closeBaileysSocket() {
+  clearTimeout(reconnectTimer);
+  reconnectTimer = undefined;
+  manuallyLoggedOut = true;
+  const existingSocket = socket;
+  if (!existingSocket) return;
+  await new Promise((resolve) => {
+    let settled = false;
+    const finish = () => { if (!settled) { settled = true; clearTimeout(timer); resolve(); } };
+    const timer = setTimeout(finish, 5000);
+    existingSocket.ev.on("connection.update", ({ connection }) => { if (connection === "close") finish(); });
+    try {
+      const ending = existingSocket.end?.(new Error("SMART PRINT WhatsApp session reset"));
+      if (ending?.then) ending.then(finish).catch(finish);
+    } catch { finish(); }
+  });
+  if (socket === existingSocket) socket = undefined;
+}
+
+async function resetBaileysSession() {
+  await closeBaileysSocket();
+  await fs.rm(authDir, { recursive: true, force: true });
+  baileys = { state: "disconnected", qr: null, user: null, error: null };
+  await startBaileys(true);
 }
 
 const app = express();
@@ -969,7 +1016,8 @@ app.post("/api/messages/:contactId", async (req, res, next) => {
     res.json(messages[contactId]);
   } catch (error) { next(error); }
 });
-app.post("/api/baileys/connect", async (_req, res, next) => { try { await startBaileys(true); res.json(status()); } catch (error) { next(error); } });
+app.post("/api/baileys/connect", async (_req, res, next) => { try { await resetBaileysSession(); res.json(status()); } catch (error) { next(error); } });
+app.post("/api/baileys/reset", async (_req, res, next) => { try { await resetBaileysSession(); res.json(status()); } catch (error) { next(error); } });
 app.post("/api/baileys/reconnect", async (_req, res, next) => { try { socket?.end?.(undefined); await startBaileys(true); res.json(status()); } catch (error) { next(error); } });
 app.post("/api/baileys/logout", async (_req, res, next) => {
   try {
