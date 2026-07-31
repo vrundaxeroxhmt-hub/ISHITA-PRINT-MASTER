@@ -10,6 +10,10 @@ export type PrintFile = {
   status: JobStatus;
   /** Demo source URL for the editor preview. */
   src?: string;
+  originalSrc?: string;
+  processedSrc?: string;
+  activeSrc?: string;
+  aiProcessingStatus?: "processing" | "completed" | "skipped" | "failed";
   /** Temporary edited thumbnail shown live in the job list. */
   livePreview?: string;
   /** Tight bitmap produced by Apply Crop, without an A4 page around it. */

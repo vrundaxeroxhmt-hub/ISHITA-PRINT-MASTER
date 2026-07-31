@@ -10,6 +10,9 @@ import crypto from "node:crypto";
 import sharp from "sharp";
 import makeWASocket, { Browsers, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, useMultiFileAuthState } from "@whiskeysockets/baileys";
 
+import fsSync from "node:fs";
+import { processDocumentWithAiEngine } from "./ai-engine-adapter.mjs";
+
 const appRoot = path.resolve(process.env.PRINTDESK_APP_ROOT || process.cwd());
 const dataDir = path.resolve(process.env.PRINTDESK_DATA_DIR || path.join(appRoot, ".whatsapp-data"));
 const authDir = path.join(dataDir, "baileys-auth");
@@ -200,6 +203,73 @@ async function downloadUrl(rawUrl, headers = {}) {
   throw new Error("Too many redirects");
 }
 
+function triggerAsyncAiProcessing(sourcePath, fileId) {
+  if (!sourcePath || !fsSync.existsSync(sourcePath)) return;
+
+  void processDocumentWithAiEngine(sourcePath).then(async (res) => {
+    const job = jobs.find((j) => j.files?.some((f) => f.id === fileId));
+    if (!job) return;
+    const fileObj = job.files.find((f) => f.id === fileId);
+    if (!fileObj) return;
+
+    let valid = false;
+    let processedPath = res?.processed_file;
+
+    if (res && res.success && processedPath && typeof processedPath === "string") {
+      const resolvedProcessed = path.resolve(processedPath);
+      const resolvedOriginal = path.resolve(sourcePath);
+      const resolvedFilesDir = path.resolve(filesDir);
+      const ext = path.extname(resolvedProcessed).toLowerCase();
+
+      if (
+        resolvedProcessed !== resolvedOriginal &&
+        resolvedProcessed.startsWith(resolvedFilesDir) &&
+        allowedExtensions.has(ext) &&
+        fsSync.existsSync(resolvedProcessed) &&
+        fsSync.statSync(resolvedProcessed).size > 0
+      ) {
+        valid = true;
+      }
+    }
+
+    if (valid) {
+      const relativeFile = path.relative(filesDir, processedPath).split(path.sep).map(encodeURIComponent).join("/");
+      const timestamp = Date.now();
+      const processedPublicFile = `http://127.0.0.1:${port}/api/files/${relativeFile}?v=${timestamp}`;
+
+      fileObj.originalSrc = fileObj.originalSrc || fileObj.src;
+      fileObj.processedSrc = processedPublicFile;
+      fileObj.activeSrc = processedPublicFile;
+      fileObj.src = processedPublicFile;
+      fileObj.aiProcessingStatus = "completed";
+
+      await writeJson(jobsFile, jobs);
+      logger.info({ jobId: job.id, fileId, processedFile: processedPath }, "[AI ENGINE] Processed derivative attached to job file successfully");
+    } else {
+      fileObj.originalSrc = fileObj.originalSrc || fileObj.src;
+      fileObj.activeSrc = fileObj.originalSrc;
+      fileObj.src = fileObj.originalSrc;
+      fileObj.aiProcessingStatus = res?.status === "skipped" ? "skipped" : "failed";
+
+      await writeJson(jobsFile, jobs);
+      logger.info({ jobId: job.id, fileId, status: fileObj.aiProcessingStatus, reason: res?.reason }, "[AI ENGINE] Processing skipped or failed; fallback to original image");
+    }
+  }).catch(async (err) => {
+    logger.warn({ error: err.message, fileId }, "[AI ENGINE] Processing exception; fallback to original image");
+    const job = jobs.find((j) => j.files?.some((f) => f.id === fileId));
+    if (job) {
+      const fileObj = job.files.find((f) => f.id === fileId);
+      if (fileObj) {
+        fileObj.originalSrc = fileObj.originalSrc || fileObj.src;
+        fileObj.activeSrc = fileObj.originalSrc;
+        fileObj.src = fileObj.originalSrc;
+        fileObj.aiProcessingStatus = "failed";
+        await writeJson(jobsFile, jobs);
+      }
+    }
+  });
+}
+
 async function addPrintableJob({ contactId, buffer, fileName, mimeType, timestamp = Date.now(), subfolder, originalFileId, sourceMessageId }) {
   if (sourceMessageId && (processingSourceMessages.has(sourceMessageId) || jobs.some((job) => job.files?.some((file) => file.sourceMessageId === sourceMessageId)))) return false;
   if (sourceMessageId) processingSourceMessages.add(sourceMessageId);
@@ -238,6 +308,9 @@ async function addPrintableJob({ contactId, buffer, fileName, mimeType, timestam
     receivedAt: timestamp,
     status: "in_review",
     src: publicFile,
+    originalSrc: publicFile,
+    activeSrc: publicFile,
+    aiProcessingStatus: kind === "image" ? "processing" : undefined,
     originalFileId: originalFileId || undefined,
     sourceMessageId: sourceMessageId || undefined,
     source: sourceMessageId?.startsWith("meta:") ? "meta" : "baileys"
@@ -276,6 +349,9 @@ async function addPrintableJob({ contactId, buffer, fileName, mimeType, timestam
   }
   jobs = jobs.slice(0, 1000);
   await writeJson(jobsFile, jobs);
+  if (kind === "image") {
+    triggerAsyncAiProcessing(sourcePath, token);
+  }
   return true;
   } finally {
     if (sourceMessageId) processingSourceMessages.delete(sourceMessageId);
