@@ -18,6 +18,7 @@ export class QueueRepository {
     return raw.map((item) => ({
       ...item,
       fileIds: Array.isArray(item.fileIds) ? [...item.fileIds] : [],
+      fileSourceUrls: Array.isArray(item.fileSourceUrls) ? [...item.fileSourceUrls] : [],
     }));
   }
 
@@ -25,6 +26,7 @@ export class QueueRepository {
     const serialized = items.map((item) => ({
       ...item,
       fileIds: [...item.fileIds],
+      fileSourceUrls: [...item.fileSourceUrls],
     }));
     this.storage.set(QUEUE_ITEMS_STORAGE_KEY, serialized);
   }

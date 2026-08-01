@@ -206,7 +206,7 @@ async function downloadUrl(rawUrl, headers = {}) {
 function triggerAsyncAiProcessing(sourcePath, fileId) {
   if (!sourcePath || !fsSync.existsSync(sourcePath)) return;
 
-  void processDocumentWithAiEngine(sourcePath).then(async (res) => {
+  void processDocumentWithAiEngine(sourcePath, { storageRoot: filesDir }).then(async (res) => {
     const job = jobs.find((j) => j.files?.some((f) => f.id === fileId));
     if (!job) return;
     const fileObj = job.files.find((f) => f.id === fileId);

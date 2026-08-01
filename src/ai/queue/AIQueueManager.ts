@@ -59,23 +59,30 @@ export class AIQueueManager implements AIQueueController {
   }
 
   public enqueueNormalizedEvent(event: NormalizedInboundEvent): CustomerQueueItem {
-    return this.handleIncomingFile(event.customerId, event.fileId, event.receivedAt);
+    return this.handleIncomingFile(event.customerId, event.fileId, event.receivedAt, event.fileSourceUrl);
   }
 
   public handleIncomingFile(
     customerId: string,
     fileId: string,
-    receivedAt: number = Date.now()
+    receivedAt: number = Date.now(),
+    fileSourceUrl?: string
   ): CustomerQueueItem {
     const routeResult = this.sessionRouter.routeIncomingFile({ customerId, fileId, receivedAt });
     const settings = this.settingsStore.getSettings();
 
     const existingItem = this.queueStore.getItem(customerId);
     const isNewFile = !existingItem || !existingItem.fileIds.includes(fileId);
+    const isNewSourceUrl = Boolean(fileSourceUrl && !existingItem?.fileSourceUrls.includes(fileSourceUrl));
 
     const fileIds = existingItem && existingItem.jobSessionId === routeResult.jobSessionId
       ? (existingItem.fileIds.includes(fileId) ? existingItem.fileIds : [...existingItem.fileIds, fileId])
       : [fileId];
+    const fileSourceUrls = existingItem && existingItem.jobSessionId === routeResult.jobSessionId
+      ? (fileSourceUrl && !existingItem.fileSourceUrls.includes(fileSourceUrl)
+          ? [...existingItem.fileSourceUrls, fileSourceUrl]
+          : existingItem.fileSourceUrls)
+      : fileSourceUrl ? [fileSourceUrl] : [];
 
     // Prevent resetting completed/active queue items unless a new file actually arrived
     if (existingItem && !isNewFile && (
@@ -83,6 +90,12 @@ export class AIQueueManager implements AIQueueController {
       existingItem.state === 'PROCESSING_ACTIVE' ||
       existingItem.state === 'CANCELLED'
     )) {
+      if (isNewSourceUrl && existingItem.jobSessionId === routeResult.jobSessionId) {
+        const enrichedItem = { ...existingItem, fileSourceUrls, updatedAt: Date.now() };
+        this.queueStore.upsertItem(enrichedItem);
+        this.persistQueueState();
+        return enrichedItem;
+      }
       return existingItem;
     }
 
@@ -110,6 +123,7 @@ export class AIQueueManager implements AIQueueController {
       state: 'WAITING_COMPLETION_WINDOW',
       processingState: 'waiting-completion',
       fileIds,
+      fileSourceUrls,
       classification: existingItem?.classification,
       route: existingItem?.route,
       processingResult: existingItem?.processingResult,
@@ -390,14 +404,24 @@ export class AIQueueManager implements AIQueueController {
 
       const customerInstructions = await this.fetchRecentCustomerInstructions(customerId, item.enqueuedAt);
 
-      const files = item.fileIds.map((id) => {
-        const ext = id.split('.').pop()?.toLowerCase() || '';
+      const files = item.fileIds.map((id, index) => {
+        const sourceUrl = item.fileSourceUrls[index];
+        let name = id;
+        if (sourceUrl) {
+          try {
+            const pathName = new URL(sourceUrl).pathname;
+            name = decodeURIComponent(pathName.split('/').filter(Boolean).pop() || id);
+          } catch {
+            name = id;
+          }
+        }
+        const ext = name.split('.').pop()?.toLowerCase() || '';
         let mimeType = 'application/octet-stream';
         if (ext === 'pdf') mimeType = 'application/pdf';
         else if (['jpg', 'jpeg', 'png', 'webp', 'bmp'].includes(ext)) mimeType = `image/${ext === 'jpg' ? 'jpeg' : ext}`;
         return {
           id,
-          name: id,
+          name,
           mimeType,
         };
       });
@@ -416,15 +440,23 @@ export class AIQueueManager implements AIQueueController {
 
       // Step 3: Execution
       this.updateProcessingState(customerId, 'processing');
-      const processingResult = await JobProcessor.processJob(
-        {
-          jobSessionId,
-          customerId,
-          fileSourceUrls: item.fileIds,
-        },
-        classification,
-        route
-      );
+      const processingResult = item.fileSourceUrls.length === 0
+        ? {
+            jobSessionId,
+            status: 'manual-review' as const,
+            summary: 'Manual review required: no usable source URL was supplied for processing; stable file IDs were retained.',
+            error: 'No usable file source URL is available. Processing was skipped to prevent passing a file ID to Sharp.',
+            processedAt: Date.now(),
+          }
+        : await JobProcessor.processJob(
+            {
+              jobSessionId,
+              customerId,
+              fileSourceUrls: item.fileSourceUrls,
+            },
+            classification,
+            route
+          );
 
       // Step 4: Save final result & transition state
       const targetState: CustomerJobState = processingResult.status === 'failed' ? 'CANCELLED' : 'AUTO_PROCESSING_COMPLETE';

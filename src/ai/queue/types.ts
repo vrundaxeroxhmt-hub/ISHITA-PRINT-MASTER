@@ -40,6 +40,7 @@ export interface CustomerQueueItem {
   completionWindowOpenedAt?: number;
   isSealed?: boolean;
   fileIds: string[];
+  fileSourceUrls: string[];
   classification?: AIJobClassification;
   route?: AIProcessingRoute;
   processingResult?: AIProcessingResult;
@@ -59,6 +60,7 @@ export interface NormalizedInboundEvent {
   customerId: string;
   customerName?: string;
   fileId: string;
+  fileSourceUrl?: string;
   mediaType: 'image' | 'document' | 'video' | 'audio' | 'unknown';
   mediaId?: string;
   mimeType?: string;

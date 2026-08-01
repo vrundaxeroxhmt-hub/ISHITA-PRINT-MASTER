@@ -133,6 +133,7 @@ export class AIQueueStore {
     return {
       ...item,
       fileIds: [...item.fileIds],
+      fileSourceUrls: [...item.fileSourceUrls],
     };
   }
 }
