@@ -754,6 +754,50 @@ app.post("/api/jobs/working-preview", async (req, res, next) => {
     res.json({ ok: true, file, jobs });
   } catch (error) { next(error); }
 });
+app.post("/api/jobs/files/:fileId/pdf-editor-state", async (req, res, next) => {
+  try {
+    const fileId = req.params.fileId;
+    const pageRotations = req.body?.pageRotations;
+
+    if (!pageRotations || typeof pageRotations !== "object" || Array.isArray(pageRotations)) {
+      return res.status(400).json({ error: "pageRotations object is required." });
+    }
+
+    for (const value of Object.values(pageRotations)) {
+      if (![0, 90, 180, 270].includes(value)) {
+        return res.status(400).json({ error: "Invalid PDF page rotation." });
+      }
+    }
+
+    const job = jobs.find((item) =>
+      item.files?.some((file) => file.id === fileId)
+    );
+    const file = job?.files.find((item) => item.id === fileId);
+
+    if (!job || !file) {
+      return res.status(404).json({ error: "PDF job file was not found." });
+    }
+
+    if (file.kind !== "pdf") {
+      return res.status(400).json({ error: "Selected file is not a PDF." });
+    }
+
+    file.pdfEditorState = {
+      ...(file.pdfEditorState || {}),
+      pageRotations,
+    };
+
+    await writeJson(jobsFile, jobs);
+
+    res.json({
+      ok: true,
+      file,
+      jobs,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 app.post("/api/jobs/processed", async (req, res, next) => {
   try {
     const { contactId, fileName, mimeType, dataUrl, originalFileId } = req.body || {};

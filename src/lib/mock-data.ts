@@ -14,6 +14,8 @@ export type PrintFile = {
   processedSrc?: string;
   selectedSrc?: string;
   activeSrc?: string;
+  pdfEditorState?: {
+  pageRotations: Record<string, 0 | 90 | 180 | 270>;};
   aiProcessingStatus?: "processing" | "completed" | "skipped" | "failed";
   /** Temporary edited thumbnail shown live in the job list. */
   livePreview?: string;

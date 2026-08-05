@@ -17,7 +17,9 @@ import {
   X,
 } from "lucide-react";
 import type { PrintFile } from "@/lib/mock-data";
+import { gatewayUrl } from "@/lib/gateway-url";
 import { PerspectiveCropDialog } from "./PerspectiveCropDialog";
+
 import { DEFAULT_PDF_ENHANCE, PdfPageEnhanceDialog, type PdfEnhanceSettings } from "./PdfPageEnhanceDialog";
 import { openPrintWindow, printPdfBytes } from "../printSingleFile";
 
@@ -162,7 +164,9 @@ export function PdfEditor({
       for (let i = 0; i < rdoc.numPages; i++) {
         const pdfPage = await rdoc.getPage(i + 1);
         const text = await pdfPage.getTextContent();
-        initPages.push({ id: nextId(), srcDocIdx: 0, srcPageIdx: i, rotate: 0, enhance: text.items.length >= 5 ? undefined : { ...DEFAULT_PDF_ENHANCE, mode: "scan" } });
+        initPages.push({ id: nextId(), srcDocIdx: 0, srcPageIdx: i, rotate:
+  file.pdfEditorState?.pageRotations?.[`0:${i}`] ??
+  0, enhance: text.items.length >= 5 ? undefined : { ...DEFAULT_PDF_ENHANCE, mode: "scan" } });
       }
       setSrcDocs([bytes]);
       setSrcRenderDocs([rdoc]);
@@ -195,16 +199,60 @@ export function PdfEditor({
   );
 
   const rotate = (id: string, delta: number) => {
-    setPages((prev) =>
-      prev.map((p) => {
-        if (p.id !== id) return p;
-        const r = (((p.rotate + delta) % 360) + 360) % 360;
-        return { ...p, rotate: r as 0 | 90 | 180 | 270, thumb: undefined };
-      }),
-    );
-    // rerender after state applies
-    setTimeout(() => refreshThumb(id), 0);
-  };
+  const nextPages = pages.map((page) => {
+    if (page.id !== id) return page;
+
+    const nextRotation =
+      (((page.rotate + delta) % 360) + 360) % 360;
+
+    return {
+      ...page,
+      rotate: nextRotation as 0 | 90 | 180 | 270,
+      thumb: undefined,
+    };
+  });
+
+  setPages(nextPages);
+
+  const changedPage = nextPages.find((page) => page.id === id);
+  if (changedPage) {
+    const renderDoc = srcRenderDocsRef.current[changedPage.srcDocIdx];
+
+    if (renderDoc) {
+      void renderThumb(
+        renderDoc,
+        changedPage.srcPageIdx,
+        changedPage.rotate,
+      ).then((thumb) => {
+        setPages((current) =>
+          current.map((page) =>
+            page.id === id ? { ...page, thumb } : page,
+          ),
+        );
+      });
+    }
+  }
+
+  const pageRotations = Object.fromEntries(
+    nextPages.map((page) => [
+      `${page.srcDocIdx}:${page.srcPageIdx}`,
+      page.rotate,
+    ]),
+  );
+
+  void fetch(
+    gatewayUrl(
+      `/api/jobs/files/${encodeURIComponent(file.id)}/pdf-editor-state`,
+    ),
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pageRotations }),
+    },
+  ).catch((error) => {
+    console.error("PDF rotation save failed:", error);
+  });
+};
 
   const remove = (id: string) => {
     setPages((prev) => prev.filter((p) => p.id !== id));
@@ -453,7 +501,7 @@ export function PdfEditor({
       for (let i = 0; i < bytes.length; i += chunkSize) binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
       const dataUrl = `data:application/pdf;base64,${btoa(binary)}`;
       const base = (file.originalFile?.name || file.name).replace(/\.pdf$/i, "");
-      const response = await fetch("http://127.0.0.1:3001/api/jobs/processed", {
+      const response = await fetch(gatewayUrl("/api/jobs/processed"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ contactId, fileName: `${base}_edited.pdf`, mimeType: "application/pdf", dataUrl, originalFileId: file.originalFileId || file.id }),
@@ -482,7 +530,7 @@ export function PdfEditor({
   const openInDefaultApp = async () => {
     setBusy("Opening in default PDF app...");
     try {
-      const response = await fetch(`http://127.0.0.1:3001/api/jobs/files/${encodeURIComponent(file.id)}/open-default`, { method: "POST" });
+      const response = await fetch(gatewayUrl(`/api/jobs/files/${encodeURIComponent(file.id)}/open-default`), { method: "POST" });
       if (!response.ok) throw new Error((await response.json()).error || "Could not open PDF app.");
     } finally {
       setBusy(null);
