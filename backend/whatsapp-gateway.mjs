@@ -758,6 +758,7 @@ app.post("/api/jobs/files/:fileId/pdf-editor-state", async (req, res, next) => {
   try {
     const fileId = req.params.fileId;
     const pageRotations = req.body?.pageRotations;
+    const pageEnhanceSettings = req.body?.pageEnhanceSettings;
 
     if (!pageRotations || typeof pageRotations !== "object" || Array.isArray(pageRotations)) {
       return res.status(400).json({ error: "pageRotations object is required." });
@@ -783,9 +784,12 @@ app.post("/api/jobs/files/:fileId/pdf-editor-state", async (req, res, next) => {
     }
 
     file.pdfEditorState = {
-      ...(file.pdfEditorState || {}),
-      pageRotations,
-    };
+  ...(file.pdfEditorState || {}),
+  pageRotations,
+  ...(pageEnhanceSettings
+    ? { pageEnhanceSettings }
+    : {}),
+};
 
     await writeJson(jobsFile, jobs);
 

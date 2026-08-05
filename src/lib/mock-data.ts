@@ -15,7 +15,10 @@ export type PrintFile = {
   selectedSrc?: string;
   activeSrc?: string;
   pdfEditorState?: {
-  pageRotations: Record<string, 0 | 90 | 180 | 270>;};
+  pageRotations: Record<string, 0 | 90 | 180 | 270>;
+  pageEnhanceSettings?: Record<
+    string,
+    import("@/components/shop/editor/PdfPageEnhanceDialog").PdfEnhanceSettings>;};
   aiProcessingStatus?: "processing" | "completed" | "skipped" | "failed";
   /** Temporary edited thumbnail shown live in the job list. */
   livePreview?: string;

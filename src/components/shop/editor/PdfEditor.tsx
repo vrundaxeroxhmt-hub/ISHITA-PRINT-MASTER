@@ -166,7 +166,11 @@ export function PdfEditor({
         const text = await pdfPage.getTextContent();
         initPages.push({ id: nextId(), srcDocIdx: 0, srcPageIdx: i, rotate:
   file.pdfEditorState?.pageRotations?.[`0:${i}`] ??
-  0, enhance: text.items.length >= 5 ? undefined : { ...DEFAULT_PDF_ENHANCE, mode: "scan" } });
+  0, enhance:
+  file.pdfEditorState?.pageEnhanceSettings?.[`0:${i}`] ??
+  (text.items.length >= 5
+    ? undefined
+    : { ...DEFAULT_PDF_ENHANCE, mode: "scan" }), });
       }
       setSrcDocs([bytes]);
       setSrcRenderDocs([rdoc]);
@@ -176,12 +180,37 @@ export function PdfEditor({
       setLoading(false);
       // Render thumbs
       for (const p of initPages) {
-        const t = await renderThumb(rdoc, p.srcPageIdx, p.rotate);
-        if (cancelled) return;
-        setPages((prev) => prev.map((x) => (x.id === p.id ? { ...x, thumb: t } : x)));
-      }
-    })();
-    return () => {
+  let thumb: string;
+
+  if (p.enhance?.mode === "scan") {
+    const processed = await processScanPage(
+      rdoc,
+      p.srcPageIdx,
+      p.rotate,
+      p.enhance,
+    );
+    thumb = processed.preview;
+  } else {
+    thumb = await renderThumb(
+      rdoc,
+      p.srcPageIdx,
+      p.rotate,
+    );
+  }
+
+  if (cancelled) return;
+
+  setPages((prev) =>
+    prev.map((x) =>
+      x.id === p.id
+        ? { ...x, thumb }
+        : x,
+    ),
+  );
+}
+
+})();
+return () => {
       cancelled = true;
     };
   }, [file.id, file.name, file.pages]);
@@ -442,6 +471,31 @@ export function PdfEditor({
 
   const applyEnhance = async (settings: PdfEnhanceSettings, all: boolean) => {
     const ids = all ? new Set(pages.map((p) => p.id)) : new Set([enhancePageId]);
+    const pageEnhanceSettings = Object.fromEntries(
+  pages.map((page) => [
+    `${page.srcDocIdx}:${page.srcPageIdx}`,
+    ids.has(page.id) ? settings : page.enhance,
+  ]),
+);
+
+void fetch(
+  gatewayUrl(
+    `/api/jobs/files/${encodeURIComponent(file.id)}/pdf-editor-state`,
+  ),
+  {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      pageRotations: Object.fromEntries(
+  pages.map((page) => [
+    `${page.srcDocIdx}:${page.srcPageIdx}`,
+    page.rotate,
+  ]),
+),
+      pageEnhanceSettings,
+    }),
+  },
+).catch(console.error);
     setPages((prev) => prev.map((p) => ids.has(p.id) ? {...p,enhance:settings} : p));
     setEnhancePageId(null); setEnhanceSource(null);
     setBusy("Updating previews...");

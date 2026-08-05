@@ -69,10 +69,91 @@ export function PdfPageEnhanceDialog({ source, initial, onClose, onApply }: { so
   };
   const filter = `brightness(${settings.brightness}%) contrast(${settings.contrast + settings.darkness}%) ${settings.treatment === "grayscale" || settings.treatment === "bw" ? "grayscale(1)" : ""} ${settings.invert ? "invert(1)" : ""}`;
   return <div className="absolute inset-0 z-[70] flex bg-black/85">
-    <div className="flex min-w-0 flex-1 flex-col p-4"><div className="mb-2 flex items-center text-sm font-semibold">PDF Page Editor <span className="ml-2 text-[10px] font-normal text-muted-foreground">Drag a rectangle for Manual Border Crop</span></div><div className="relative min-h-0 flex-1 select-none overflow-hidden rounded border border-border bg-neutral-900 p-3"><div className="relative mx-auto h-full w-fit max-w-full" onPointerDown={(e) => { if (settings.mode !== "scan") return; const r = e.currentTarget.getBoundingClientRect(); const x=e.clientX-r.left,y=e.clientY-r.top; setDrag({x,y}); setBox({x,y,w:0,h:0}); }} onPointerMove={(e) => { if (!drag) return; const r=e.currentTarget.getBoundingClientRect(); const x=Math.max(0,Math.min(r.width,e.clientX-r.left)),y=Math.max(0,Math.min(r.height,e.clientY-r.top)); setBox({x:Math.min(drag.x,x),y:Math.min(drag.y,y),w:Math.abs(x-drag.x),h:Math.abs(y-drag.y)}); }} onPointerUp={() => { setDrag(null); finishBox(); }}><img ref={imageRef} src={source} className="h-full max-w-full object-contain" style={{ filter, transform: `rotate(${settings.deskew}deg)` }} alt="PDF page" />{box && <div className="pointer-events-none absolute border-2 border-cyan-400 bg-cyan-400/10" style={{left:box.x,top:box.y,width:box.w,height:box.h}} />}</div></div></div>
+    <div className="flex min-w-0 flex-1 flex-col p-4"><div className="mb-2 flex items-center text-sm font-semibold">PDF Page Editor <span className="ml-2 text-[10px] font-normal text-muted-foreground">Drag a rectangle for Manual Border Crop</span></div><div className="relative min-h-0 flex-1 select-none overflow-hidden rounded border border-border bg-neutral-900 p-3"><div className="relative mx-auto h-full w-fit max-w-full" onPointerDown={(e) => { if (settings.mode !== "scan") return; const r = e.currentTarget.getBoundingClientRect(); const x=e.clientX-r.left,y=e.clientY-r.top; setDrag({x,y}); setBox({x,y,w:0,h:0}); }} onPointerMove={(e) => { if (!drag) return; const r=e.currentTarget.getBoundingClientRect(); const x=Math.max(0,Math.min(r.width,e.clientX-r.left)),y=Math.max(0,Math.min(r.height,e.clientY-r.top)); setBox({x:Math.min(drag.x,x),y:Math.min(drag.y,y),w:Math.abs(x-drag.x),h:Math.abs(y-drag.y)}); }} onPointerUp={() => { setDrag(null); finishBox(); }}>
+      <img
+  ref={imageRef}
+  src={source}
+  className="h-full max-w-full object-contain"
+  style={{
+    filter,
+    transform: `rotate(${settings.deskew}deg)`,
+    clipPath: `inset(
+      ${settings.crop.top}%
+      ${settings.crop.right}%
+      ${settings.crop.bottom}%
+      ${settings.crop.left}%
+    )`,
+  }}
+  alt="PDF page"
+/>
+      {box && <div className="pointer-events-none absolute border-2 border-cyan-400 bg-cyan-400/10" style={{left:box.x,top:box.y,width:box.w,height:box.h}} />}</div></div></div>
     <aside className="w-[290px] overflow-auto border-l border-border bg-card p-4"><div className="mb-3 flex items-center"><h3 className="text-sm font-semibold">Crop / Deskew / Enhance</h3><button onClick={onClose} className="ml-auto"><X className="h-4 w-4" /></button></div>
       <div className="mb-3 grid grid-cols-2 gap-1"><button onClick={() => setSettings(DEFAULT_PDF_ENHANCE)} className={`rounded border p-2 text-[10px] ${settings.mode === "preserve" ? "border-primary text-primary" : "border-border"}`}>Preserve Quality</button><button onClick={() => patch({})} className={`rounded border p-2 text-[10px] ${settings.mode === "scan" ? "border-primary text-primary" : "border-border"}`}>Scan Enhancement</button></div>
-      <div className="space-y-3"><button onClick={() => patch({ invert: !settings.invert })} className={`w-full rounded border py-2 text-[10px] ${settings.invert ? "border-primary bg-primary/15 text-primary" : "border-border"}`}>{settings.invert ? "Negative Invert: ON" : "Make Black Background White"}</button><button onClick={async () => patch({ deskew: await estimateDeskew(source) })} className="w-full rounded border border-border py-1.5 text-[10px]">Auto Deskew</button><Range label="Fine Deskew °" value={settings.deskew} min={-10} max={10} step={0.1} onChange={(v) => patch({deskew:v})} /><Range label="Brightness" value={settings.brightness} min={50} max={160} onChange={(v) => patch({brightness:v})} /><Range label="Contrast" value={settings.contrast} min={50} max={200} onChange={(v) => patch({contrast:v})} /><Range label="Print Darkness" value={settings.darkness} min={0} max={100} onChange={(v) => patch({darkness:v})} /><Range label="Background Whitening" value={settings.whiteBackground} min={0} max={100} onChange={(v) => patch({whiteBackground:v})} /><Range label="Noise / Spot Cleanup" value={settings.cleanup} min={0} max={100} onChange={(v) => patch({cleanup:v})} />
+      <div className="space-y-3"><button onClick={() => patch({ invert: !settings.invert })} className={`w-full rounded border py-2 text-[10px] ${settings.invert ? "border-primary bg-primary/15 text-primary" : "border-border"}`}>{settings.invert ? "Negative Invert: ON" : "Make Black Background White"}</button><button onClick={async () => patch({ deskew: await estimateDeskew(source) })} className="w-full rounded border border-border py-1.5 text-[10px]">Auto Deskew</button>
+      <Range
+  label="Crop Left %"
+  value={settings.crop.left}
+  min={0}
+  max={45}
+  step={0.5}
+  onChange={(value) =>
+    patch({
+      crop: {
+        ...settings.crop,
+        left: Math.min(value, 95 - settings.crop.right),
+      },
+    })
+  }
+/>
+
+<Range
+  label="Crop Right %"
+  value={settings.crop.right}
+  min={0}
+  max={45}
+  step={0.5}
+  onChange={(value) =>
+    patch({
+      crop: {
+        ...settings.crop,
+        right: Math.min(value, 95 - settings.crop.left),
+      },
+    })
+  }
+/>
+
+<Range
+  label="Crop Top %"
+  value={settings.crop.top}
+  min={0}
+  max={45}
+  step={0.5}
+  onChange={(value) =>
+    patch({
+      crop: {
+        ...settings.crop,
+        top: Math.min(value, 95 - settings.crop.bottom),
+      },
+    })
+  }
+/>
+
+<Range
+  label="Crop Bottom %"
+  value={settings.crop.bottom}
+  min={0}
+  max={45}
+  step={0.5}
+  onChange={(value) =>
+    patch({
+      crop: {
+        ...settings.crop,
+        bottom: Math.min(value, 95 - settings.crop.top),
+      },
+    })
+  }
+/>
+      <Range label="Fine Deskew °" value={settings.deskew} min={-10} max={10} step={0.1} onChange={(v) => patch({deskew:v})} /><Range label="Brightness" value={settings.brightness} min={50} max={160} onChange={(v) => patch({brightness:v})} /><Range label="Contrast" value={settings.contrast} min={50} max={200} onChange={(v) => patch({contrast:v})} /><Range label="Print Darkness" value={settings.darkness} min={0} max={100} onChange={(v) => patch({darkness:v})} /><Range label="Background Whitening" value={settings.whiteBackground} min={0} max={100} onChange={(v) => patch({whiteBackground:v})} /><Range label="Noise / Spot Cleanup" value={settings.cleanup} min={0} max={100} onChange={(v) => patch({cleanup:v})} />
       <div className="grid grid-cols-3 gap-1">{(["original","grayscale","bw"] as const).map((t) => <button key={t} onClick={() => patch({treatment:t})} className={`rounded border p-1.5 text-[9px] ${settings.treatment===t?"border-primary text-primary":"border-border"}`}>{t === "bw" ? "B & W" : t}</button>)}</div>
       <button onClick={() => { setSettings((s) => ({...s,crop:{left:0,top:0,right:0,bottom:0}})); setBox(null); }} className="w-full rounded border border-border py-1.5 text-[10px]">Reset Manual Crop</button>
       <div className="mt-4 grid grid-cols-2 gap-2"><button onClick={() => onApply(settings,false)} className="rounded bg-primary p-2 text-[10px] text-primary-foreground">Apply Current</button><button onClick={() => onApply(settings,true)} className="rounded border border-primary p-2 text-[10px] text-primary">Apply All Pages</button></div></div>
