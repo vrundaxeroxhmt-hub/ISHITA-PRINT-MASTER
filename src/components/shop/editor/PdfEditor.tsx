@@ -114,13 +114,17 @@ export function PdfEditor({
   chatFiles,
   contactId,
   onLivePreview,
-  onSaveHandler,
+onSaveHandler,
+onOutputHandler,
 }: {
   file: PrintFile;
   chatFiles: PrintFile[];
   contactId: string;
   onLivePreview?: (dataUrl: string) => void;
   onSaveHandler?: (handler: (() => Promise<void>) | null) => void;
+  onOutputHandler?: (
+  handler: (() => Promise<Uint8Array>) | null
+) => void;
 }) {
   const [srcDocs, setSrcDocs] = useState<Uint8Array[]>([]);
   const [srcRenderDocs, setSrcRenderDocs] = useState<PDFDocumentProxy[]>([]);
@@ -545,6 +549,15 @@ void fetch(
     const first = pages[0]?.thumb;
     if (first && onLivePreview) onLivePreview(first);
   }, [onLivePreview, pages]);
+  useEffect(() => {
+  if (!onOutputHandler) return;
+
+  onOutputHandler(buildOutput);
+
+  return () => {
+    onOutputHandler(null);
+  };
+}, [buildOutput, onOutputHandler]);
 
   useEffect(() => {
     if (!onSaveHandler) return;

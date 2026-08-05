@@ -53,8 +53,15 @@ export function PreviewPanel({
   const [repeatPrint, setRepeatPrint] = useState(true);
   const [printing, setPrinting] = useState(false);
   const saveHandler = useRef<(() => Promise<void>) | null>(null);
+  const pdfOutputHandler = useRef<(() => Promise<Uint8Array>) | null>(null);
   const openGeneratedInEditor = useRef(false);
   const registerSave = useCallback((handler: (() => Promise<void>) | null) => { saveHandler.current = handler; }, []);
+  const registerPdfOutput = useCallback(
+  (handler: (() => Promise<Uint8Array>) | null) => {
+    pdfOutputHandler.current = handler;
+  },
+  [],
+);
   const updateLivePreview = useCallback((dataUrl: string, appliedCrop?: boolean) => {
     if (file) onFilePreview(file.id, dataUrl, appliedCrop);
   }, [file?.id, onFilePreview]);
@@ -81,24 +88,64 @@ export function PreviewPanel({
     setMode(nextMode);
   };
   const printSelected = async () => {
-    const activeSrc = getFileSource(file);
-    if (!activeSrc || printing) return;
-    let printWindow: Window | null;
-    try { printWindow = openPrintWindow(); }
-    catch (error) { setSaveMessage(error instanceof Error ? error.message : "Print window was blocked"); return; }
-    setPrinting(true); setSaveMessage("");
-    try {
-      if (file.kind === "pdf") {
-        const bytes = new Uint8Array(await (await fetch(activeSrc)).arrayBuffer());
-        printPdfBytes(bytes, printWindow);
-      } else {
-        printPdfBytes(await createPhotoPrintPdf(file, printLayout, repeatPrint), printWindow);
+  if (!file || printing) return;
+
+  const activeSrc = getFileSource(file);
+
+  if (file.kind !== "pdf" && !activeSrc) return;
+
+  let printWindow: Window | null;
+
+  try {
+    printWindow = openPrintWindow();
+  } catch (error) {
+    setSaveMessage(
+      error instanceof Error
+        ? error.message
+        : "Print window was blocked",
+    );
+    return;
+  }
+
+  setPrinting(true);
+  setSaveMessage("");
+
+  try {
+    if (file.kind === "pdf") {
+      if (!pdfOutputHandler.current) {
+        throw new Error(
+          "PDF editor is still preparing the live output.",
+        );
       }
-      setPrintOpen(false);
-      await onPrinted(file.id);
-    } catch (error) { printWindow?.close(); setSaveMessage(error instanceof Error ? error.message : "Print preparation failed"); }
-    finally { setPrinting(false); }
-  };
+
+      const bytes = await pdfOutputHandler.current();
+
+      printPdfBytes(bytes, printWindow);
+    } else {
+      const bytes = await createPhotoPrintPdf(
+        file,
+        printLayout,
+        repeatPrint,
+      );
+
+      printPdfBytes(bytes, printWindow);
+    }
+
+    setPrintOpen(false);
+
+    await onPrinted(file.id);
+  } catch (error) {
+    printWindow?.close();
+
+    setSaveMessage(
+      error instanceof Error
+        ? error.message
+        : "Print preparation failed",
+    );
+  } finally {
+    setPrinting(false);
+  }
+};
 
   const Tabs = (
     <div className="flex items-center gap-1 rounded-md border border-border bg-background/60 p-0.5">
@@ -187,7 +234,7 @@ export function PreviewPanel({
       </div>
       {saveMessage && <div className="border-b border-border bg-primary/10 px-3 py-1 text-[10px] text-primary">{saveMessage}</div>}
       <div className="min-h-0 flex-1 overflow-hidden">
-        {isPdf ? <PdfEditor file={file} chatFiles={customerFiles} contactId={customerId || ""} onLivePreview={updateLivePreview} onSaveHandler={registerSave} /> : <ImageEditor file={file} contactId={customerId || ""} onLivePreview={updateLivePreview} onSaveHandler={registerSave} onSelectSource={onSelectSource} />}
+        {isPdf ? <PdfEditor file={file} chatFiles={customerFiles} contactId={customerId || ""} onLivePreview={updateLivePreview} onSaveHandler={registerSave} /> : <ImageEditor file={file} contactId={customerId || ""} onLivePreview={updateLivePreview} onOutputHandler={registerPdfOutput} onSaveHandler={registerSave} onSelectSource={onSelectSource} />}
       </div>
       {printOpen && <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/65 p-6" onClick={() => setPrintOpen(false)}>
         <div className="w-[460px] rounded-lg border border-border bg-card p-4 shadow-2xl" onClick={(event) => event.stopPropagation()}>
