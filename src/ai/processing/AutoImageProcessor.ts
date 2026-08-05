@@ -1,5 +1,6 @@
 import { getAISettings } from '../memory/AISettingsStore.ts';
 import type { ImagePrintQualityMetadata } from '../types.ts';
+import { gatewayUrl } from '../../lib/gateway-url.ts';
 
 export interface ProcessedImageResult {
   sourceFileId: string;
@@ -41,7 +42,7 @@ export class AutoImageProcessor {
 
     // Try backend Sharp-based processing API for physical file generation
     try {
-      const response = await fetch('http://127.0.0.1:3001/api/processing/process-image', {
+      const response = await fetch(gatewayUrl('/api/processing/process-image'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({

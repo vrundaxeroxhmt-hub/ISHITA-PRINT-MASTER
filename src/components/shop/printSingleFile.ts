@@ -6,11 +6,51 @@ export type PhotoPrintLayout = "full" | "13x18-2" | "9x13-4";
 const mm = (value: number) => value * 72 / 25.4;
 
 /** The shared high-quality A4 pipeline used by Batch/Selected and the header single-file Print. */
-export async function createBatchQualityPrintPdf(files: PrintFile[]) {
+export type BatchPrintSource = "latest" | "original";
+
+function getBatchPrintSource(
+  file: PrintFile,
+  sourceMode: BatchPrintSource,
+): string {
+  if (sourceMode === "original") {
+    return (
+      file.originalFile?.originalSrc ||
+      file.originalFile?.src ||
+      file.originalSrc ||
+      ""
+    );
+  }
+
+  if (file.isEdited) {
+    return (
+      file.workingSrc ||
+      file.processedSrc ||
+      file.src ||
+      file.activeSrc ||
+      file.selectedSrc ||
+      file.originalSrc ||
+      ""
+    );
+  }
+
+  return (
+    file.workingSrc ||
+    file.processedSrc ||
+    file.activeSrc ||
+    file.selectedSrc ||
+    file.src ||
+    file.originalSrc ||
+    ""
+  );
+}
+export async function createBatchQualityPrintPdf(
+  files: PrintFile[],
+  sourceMode: BatchPrintSource = "latest",
+) {
   const output = await PDFDocument.create();
   for (const file of files) {
     // The live preview is a small UI thumbnail and must never be preferred for print.
-    const sourceUrl = getFileSource(file);
+    const sourceUrl = getBatchPrintSource(file, sourceMode);
     if (!sourceUrl) continue;
     if (file.kind === "pdf") {
       const source = await PDFDocument.load(await (await fetch(sourceUrl)).arrayBuffer());

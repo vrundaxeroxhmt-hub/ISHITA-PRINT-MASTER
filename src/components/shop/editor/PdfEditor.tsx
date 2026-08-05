@@ -16,7 +16,7 @@ import {
   FolderOpen,
   X,
 } from "lucide-react";
-import type { PrintFile } from "@/lib/mock-data";
+import type { JobCard, PrintFile } from "@/lib/mock-data";
 import { gatewayUrl } from "@/lib/gateway-url";
 import { PerspectiveCropDialog } from "./PerspectiveCropDialog";
 
@@ -121,7 +121,9 @@ onOutputHandler,
   chatFiles: PrintFile[];
   contactId: string;
   onLivePreview?: (dataUrl: string) => void;
-  onSaveHandler?: (handler: (() => Promise<void>) | null) => void;
+  onSaveHandler?: (
+  handler: (() => Promise<JobCard[]>) | null
+) => void;
   onOutputHandler?: (
   handler: (() => Promise<Uint8Array>) | null
 ) => void;
@@ -573,7 +575,17 @@ void fetch(
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ contactId, fileName: `${base}_edited.pdf`, mimeType: "application/pdf", dataUrl, originalFileId: file.originalFileId || file.id }),
       });
-      if (!response.ok) throw new Error((await response.json()).error || "Save failed");
+      const result = await response.json();
+
+if (!response.ok) {
+  throw new Error(result.error || "Save failed");
+}
+
+if (!Array.isArray(result.jobs)) {
+  throw new Error("Save succeeded, but updated jobs were not returned.");
+}
+
+return result.jobs as JobCard[];
     });
     return () => onSaveHandler(null);
   }, [buildOutput, contactId, file.name, onSaveHandler]);

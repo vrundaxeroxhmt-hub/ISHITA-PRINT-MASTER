@@ -4,7 +4,12 @@ import type { Customer, JobCard, PrintFile } from "@/lib/mock-data";
 import { FileThumb } from "./FileThumb";
 import { StatusBadge } from "./StatusBadge";
 import { relTime } from "./utils";
-import { createBatchQualityPrintPdf, openPrintWindow, printPdfBytes } from "./printSingleFile";
+import {
+  createBatchQualityPrintPdf,
+  openPrintWindow,
+  printPdfBytes,
+  type BatchPrintSource,
+} from "./printSingleFile";
 import { invertSelectedFiles } from "./bulkNegativeInvert";
 import { DateFilterDropdown, type DateFilterValue } from "./DateFilterDropdown";
 import { getDefaultAIManager } from "@/ai";
@@ -40,6 +45,8 @@ export function JobList({
   const [batchMessage, setBatchMessage] = useState("");
   const [expandedJobs, setExpandedJobs] = useState<Set<string>>(new Set());
   const [printSelectedIds, setPrintSelectedIds] = useState<Set<string>>(new Set());
+  const [printSourceMode, setPrintSourceMode] =
+  useState<BatchPrintSource>("latest");
   const [uploading, setUploading] = useState(false);
   const [jobHistoryFilter, setJobHistoryFilter] = useState<DateFilterValue>("today");
   const [jobCustomDays, setJobCustomDays] = useState(7);
@@ -131,9 +138,12 @@ export function JobList({
     for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
     return `data:${mime};base64,${btoa(binary)}`;
   };
-  const buildCombinedPdf = async (files = batchFiles) => {
-    return createBatchQualityPrintPdf(files);
-  };
+  const buildCombinedPdf = async (
+  files = batchFiles,
+  sourceMode: BatchPrintSource = printSourceMode,
+) => {
+  return createBatchQualityPrintPdf(files, sourceMode);
+};
   const selectedPrintFiles = batchFiles.filter((file) => printSelectedIds.has(file.id));
   const manualUpload = async (files: File[]) => {
     if (!customer || !files.length || uploading) return; setUploading(true); setBatchMessage("");
@@ -165,14 +175,50 @@ export function JobList({
     } catch (error) { printWindow?.close(); setBatchMessage(error instanceof Error ? error.message : "Print preparation failed"); }
     finally { setBatchBusy(""); }
   };
-  const printSelected = async () => {
-    if (!selectedPrintFiles.length || batchBusy) return;
-    let printWindow: Window | null;
-    try { printWindow = openPrintWindow(); } catch (error) { setBatchMessage(error instanceof Error ? error.message : "Print window was blocked"); return; }
-    setBatchBusy("Preparing selected print..."); setBatchMessage("");
-    try { printPdfBytes(await buildCombinedPdf(selectedPrintFiles), printWindow); }
-    catch(error){printWindow?.close();setBatchMessage(error instanceof Error?error.message:"Print preparation failed");}finally{setBatchBusy("");}
-  };
+  const printSelected = async (
+  sourceMode: BatchPrintSource = printSourceMode,
+) => {
+  if (!selectedPrintFiles.length || batchBusy) return;
+
+  let printWindow: Window | null;
+
+  try {
+    printWindow = openPrintWindow();
+  } catch (error) {
+    setBatchMessage(
+      error instanceof Error
+        ? error.message
+        : "Print window was blocked",
+    );
+    return;
+  }
+
+  setBatchBusy(
+    sourceMode === "latest"
+      ? "Preparing latest edited print..."
+      : "Preparing original print...",
+  );
+  setBatchMessage("");
+
+  try {
+    const bytes = await buildCombinedPdf(
+      selectedPrintFiles,
+      sourceMode,
+    );
+
+    printPdfBytes(bytes, printWindow);
+  } catch (error) {
+    printWindow?.close();
+
+    setBatchMessage(
+      error instanceof Error
+        ? error.message
+        : "Print preparation failed",
+    );
+  } finally {
+    setBatchBusy("");
+  }
+};
   const invertSelected = async () => {
     if (!customer || !selectedPrintFiles.length || batchBusy) return;
     setBatchBusy(`Inverting 0/${selectedPrintFiles.length}...`); setBatchMessage("");
@@ -213,7 +259,38 @@ export function JobList({
             <span className="truncate">{uploading ? "Uploading..." : "Manual Upload"}</span><input type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(event)=>{const items=Array.from(event.target.files||[]);event.target.value="";void manualUpload(items);}} />
           </label>
           <button onClick={() => setBatchOpen(true)} className="inline-flex min-w-0 items-center justify-center gap-1 rounded-md border border-border bg-accent/40 px-1.5 py-1.5 text-[10px] hover:bg-accent"><Files className="h-3 w-3 shrink-0" /> <span className="truncate">Batch Save</span></button>
-          <button onClick={printSelected} disabled={!selectedPrintFiles.length || !!batchBusy} className="inline-flex min-w-0 items-center justify-center gap-1 rounded-md bg-primary px-1.5 py-1.5 text-[10px] text-primary-foreground disabled:opacity-40"><Printer className="h-3 w-3 shrink-0" /> <span className="truncate">Print ({selectedPrintFiles.length})</span></button>
+          <div className="col-span-2 grid grid-cols-[1fr_120px] overflow-hidden rounded-md border border-primary">
+  <button
+    onClick={() => void printSelected(printSourceMode)}
+    disabled={!selectedPrintFiles.length || !!batchBusy}
+    className="inline-flex min-w-0 items-center justify-center gap-1 bg-primary px-2 py-1.5 text-[10px] font-medium text-primary-foreground disabled:opacity-40"
+  >
+    <Printer className="h-3 w-3 shrink-0" />
+
+    <span className="truncate">
+      {batchBusy
+        ? "Preparing..."
+        : printSourceMode === "latest"
+          ? `Print Latest (${selectedPrintFiles.length})`
+          : `Print Original (${selectedPrintFiles.length})`}
+    </span>
+  </button>
+
+  <select
+    value={printSourceMode}
+    onChange={(event) =>
+      setPrintSourceMode(
+        event.target.value as BatchPrintSource,
+      )
+    }
+    disabled={!!batchBusy}
+    className="border-l border-primary/40 bg-background px-2 text-[10px] text-foreground outline-none disabled:opacity-40"
+    title="Choose print version"
+  >
+    <option value="latest">Latest Edited</option>
+    <option value="original">Original</option>
+  </select>
+</div>
           <button onClick={invertSelected} disabled={!selectedPrintFiles.length || !!batchBusy} className="inline-flex min-w-0 items-center justify-center gap-1 rounded-md border border-primary/60 bg-primary/10 px-1.5 py-1.5 text-[10px] text-primary disabled:opacity-40"><Sparkles className="h-3 w-3 shrink-0" /> <span className="truncate">Invert ({selectedPrintFiles.length})</span></button>
         </div>
       </div>

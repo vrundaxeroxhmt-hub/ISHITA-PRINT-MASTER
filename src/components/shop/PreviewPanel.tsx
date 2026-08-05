@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Printer, Save, Share2, Wrench, Layers, X } from "lucide-react";
-import { getFileSource, type PrintFile } from "@/lib/mock-data";
+import {
+  getFileSource,
+  type JobCard,
+  type PrintFile,
+} from "@/lib/mock-data";
 import { ImageEditor } from "./editor/ImageEditor";
 import { PdfEditor } from "./editor/PdfEditor";
 import { AadhaarLayout, type AadhaarLayoutState } from "./editor/AadhaarLayout";
@@ -8,6 +12,7 @@ import { createPhotoPrintPdf, openPrintWindow, printPdfBytes, type PhotoPrintLay
 import { MultiPageLayout, type MultiLayoutState } from "./editor/MultiPageLayout";
 import { PassportPhotoLayout, type PassportLayoutState } from "./editor/PassportPhotoLayout";
 import { PvcCardLayout, type PvcLayoutState } from "./editor/PvcCardLayout";
+import Swal from "sweetalert2";
 
 type Mode = "editor" | "aadhaar" | "multi" | "passport" | "pvc";
 
@@ -25,6 +30,7 @@ export function PreviewPanel({
   onPrinted,
   onUnbindLayout,
   onSelectSource,
+  onJobsChanged,
 }: {
  
   file: PrintFile | null;
@@ -44,6 +50,7 @@ export function PreviewPanel({
   onFilePreview: (fileId: string, dataUrl: string, appliedCrop?: boolean) => void;
   onPrinted: (fileId: string) => void | Promise<void>;
   onUnbindLayout: (fileId: string) => Promise<void>;
+  onJobsChanged: (jobs: JobCard[]) => void;
 }) {
   const [mode, setMode] = useState<Mode>("editor");
   const [saving, setSaving] = useState(false);
@@ -52,10 +59,17 @@ export function PreviewPanel({
   const [printLayout, setPrintLayout] = useState<PhotoPrintLayout>("full");
   const [repeatPrint, setRepeatPrint] = useState(true);
   const [printing, setPrinting] = useState(false);
-  const saveHandler = useRef<(() => Promise<void>) | null>(null);
+  const saveHandler = useRef<
+  (() => Promise<JobCard[]>) | null
+>(null);
   const pdfOutputHandler = useRef<(() => Promise<Uint8Array>) | null>(null);
   const openGeneratedInEditor = useRef(false);
-  const registerSave = useCallback((handler: (() => Promise<void>) | null) => { saveHandler.current = handler; }, []);
+  const registerSave = useCallback(
+  (handler: (() => Promise<JobCard[]>) | null) => {
+    saveHandler.current = handler;
+  },
+  [],
+);
   const registerPdfOutput = useCallback(
   (handler: (() => Promise<Uint8Array>) | null) => {
     pdfOutputHandler.current = handler;
@@ -71,12 +85,54 @@ export function PreviewPanel({
     setMode(file.layoutType === "aadhaar130" ? "aadhaar" : file.layoutType === "multiPage" ? ((file.multiLayout as PvcLayoutState | undefined)?.layoutKind === "pvc" ? "pvc" : "multi") : "editor");
   }, [file?.id, file?.layoutType]);
   const saveProcessed = async () => {
-    if (!saveHandler.current || saving) return;
-    setSaving(true); setSaveMessage("");
-    try { await saveHandler.current(); setSaveMessage("Saved as new edited file"); }
-    catch (error) { setSaveMessage(error instanceof Error ? error.message : "Save failed"); }
-    finally { setSaving(false); }
-  };
+  if (!saveHandler.current || saving) return;
+
+  setSaving(true);
+  setSaveMessage("");
+
+  Swal.fire({
+    title: "Saving changes...",
+    text: "Please wait while the edited PDF is saved.",
+    allowOutsideClick: false,
+    allowEscapeKey: false,
+    didOpen: () => {
+      Swal.showLoading();
+    },
+  });
+
+  try {
+    const updatedJobs = await saveHandler.current();
+
+    if (!Array.isArray(updatedJobs)) {
+      throw new Error("Updated job list was not returned.");
+    }
+
+    onJobsChanged(updatedJobs);
+    setSaveMessage("Changes saved");
+
+    await Swal.fire({
+      icon: "success",
+      title: "Changes Saved",
+      text: "The latest edited PDF is now active in the workspace and job list.",
+      timer: 1800,
+      showConfirmButton: false,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Save failed";
+
+    setSaveMessage(message);
+
+    await Swal.fire({
+      icon: "error",
+      title: "Save Failed",
+      text: message,
+      confirmButtonText: "OK",
+    });
+  } finally {
+    setSaving(false);
+  }
+};
   const changeMode = async (nextMode: Mode) => {
     if (nextMode === mode) return;
     if (mode === "editor" && file?.kind === "image" && saveHandler.current && !saving) {
@@ -142,6 +198,15 @@ export function PreviewPanel({
         ? error.message
         : "Print preparation failed",
     );
+    await Swal.fire({
+  icon: "error",
+  title: "Print Failed",
+  text:
+    error instanceof Error
+      ? error.message
+      : "Print preparation failed",
+  confirmButtonText: "OK",
+});
   } finally {
     setPrinting(false);
   }
@@ -222,7 +287,7 @@ export function PreviewPanel({
           {Tabs}
           {(file.layoutType === "multiPage" || file.layoutType === "aadhaar130" || /^Unbound_(?:Multi|Aadhaar)/.test(file.name)) && <button onClick={async () => { if (!window.confirm("Remove all generated layout pages and return to the original single files?")) return; await onUnbindLayout(file.id); setMode("editor"); }} className="inline-flex items-center gap-1 rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-300 hover:bg-amber-500/20">Unbind / Remove Layout</button>}
           <button onClick={saveProcessed} disabled={saving || !customerId} className="inline-flex items-center gap-1 rounded-md border border-border bg-accent/40 px-2 py-1 text-[11px] hover:bg-accent disabled:opacity-50">
-            <Save className="h-3 w-3" /> {saving ? "Saving..." : "Save New"}
+            <Save className="h-3 w-3" /> {saving ? "Saving..." : "Save Changes"}
           </button>
           <button className="inline-flex items-center gap-1 rounded-md border border-border bg-accent/40 px-2 py-1 text-[11px] hover:bg-accent">
             <Share2 className="h-3 w-3" /> Export
@@ -234,7 +299,24 @@ export function PreviewPanel({
       </div>
       {saveMessage && <div className="border-b border-border bg-primary/10 px-3 py-1 text-[10px] text-primary">{saveMessage}</div>}
       <div className="min-h-0 flex-1 overflow-hidden">
-        {isPdf ? <PdfEditor file={file} chatFiles={customerFiles} contactId={customerId || ""} onLivePreview={updateLivePreview} onSaveHandler={registerSave} /> : <ImageEditor file={file} contactId={customerId || ""} onLivePreview={updateLivePreview} onOutputHandler={registerPdfOutput} onSaveHandler={registerSave} onSelectSource={onSelectSource} />}
+        {isPdf ? (
+  <PdfEditor
+    file={file}
+    chatFiles={customerFiles}
+    contactId={customerId || ""}
+    onLivePreview={updateLivePreview}
+    onSaveHandler={registerSave}
+    onOutputHandler={registerPdfOutput}
+  />
+) : (
+  <ImageEditor
+    file={file}
+    contactId={customerId || ""}
+    onLivePreview={updateLivePreview}
+    onSaveHandler={registerSave}
+    onSelectSource={onSelectSource}
+  />
+)}
       </div>
       {printOpen && <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/65 p-6" onClick={() => setPrintOpen(false)}>
         <div className="w-[460px] rounded-lg border border-border bg-card p-4 shadow-2xl" onClick={(event) => event.stopPropagation()}>

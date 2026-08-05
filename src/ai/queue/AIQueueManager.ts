@@ -16,6 +16,7 @@ import { AISettingsStore } from '../memory/AISettingsStore.ts';
 import { JobClassifier } from '../classification/JobClassifier.ts';
 import { ToolRouter } from '../routing/ToolRouter.ts';
 import { JobProcessor } from '../processing/JobProcessor.ts';
+import { gatewayUrl } from '../../lib/gateway-url.ts';
 
 export class AIQueueManager implements AIQueueController {
   private queueStore: AIQueueStore;
@@ -557,7 +558,7 @@ export class AIQueueManager implements AIQueueController {
   private async fetchRecentCustomerInstructions(customerId: string, enqueuedAt: number): Promise<string[]> {
     try {
       const normId = customerId.startsWith('meta:') ? customerId : `meta:${customerId.replace(/^\+/, '')}`;
-      const response = await fetch(`http://127.0.0.1:3001/api/messages/${encodeURIComponent(normId)}`);
+      const response = await fetch(gatewayUrl(`/api/messages/${encodeURIComponent(normId)}`));
       if (!response.ok) return [];
       const chat: Array<{ id: string; text: string; direction: string; timestamp: number }> = await response.json();
       if (!Array.isArray(chat)) return [];

@@ -26,6 +26,7 @@ desktop-dist/
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars
+.dev-runtime/
 
 # Editor directories and files
 .vscode/*

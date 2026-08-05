@@ -1,6 +1,7 @@
 import { PDFDocument } from "pdf-lib";
 import { getPdfjsLib } from "@/lib/pdfjs";
 import type { PrintFile } from "@/lib/mock-data";
+import { gatewayUrl } from "@/lib/gateway-url";
 
 function invertPixels(context: CanvasRenderingContext2D, width: number, height: number) {
   const pixels = context.getImageData(0, 0, width, height);
@@ -46,7 +47,7 @@ export async function invertSelectedFiles(contactId: string, files: PrintFile[],
     if (!source) throw new Error(`${file.name} has no source file.`);
     const dataUrl = file.kind === "pdf" ? await invertPdf(source) : await invertImage(source);
     const extension = file.kind === "pdf" ? "pdf" : "jpg", base = (file.originalFile?.name || file.name).replace(/\.[^.]+$/, "");
-    const response = await fetch("http://127.0.0.1:3001/api/jobs/processed", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ contactId, fileName: `${base}_inverted.${extension}`, mimeType: file.kind === "pdf" ? "application/pdf" : "image/jpeg", dataUrl, originalFileId: file.originalFileId || file.id }) });
+    const response = await fetch(gatewayUrl("/api/jobs/processed"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ contactId, fileName: `${base}_inverted.${extension}`, mimeType: file.kind === "pdf" ? "application/pdf" : "image/jpeg", dataUrl, originalFileId: file.originalFileId || file.id }) });
     const result = await response.json(); if (!response.ok) throw new Error(result.error || `Could not invert ${file.name}`);
     latestJobs = result.jobs; onProgress?.(index + 1, files.length);
   }

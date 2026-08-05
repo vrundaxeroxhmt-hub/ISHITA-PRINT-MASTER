@@ -362,19 +362,25 @@ export function Index() {
         </section>
         <section className="min-h-0 overflow-hidden bg-background">
           <PreviewPanel
-            file={selectedFile}
-            customerImages={customerImages}
-            customerFiles={customerFiles}
-            onHideImage={handleHideImage}
-            onUnhideImage={handleUnhideImage}
-            onGeneratedImage={handleGenerated}
-            onGeneratedMulti={handleMultiGenerated}
-            onGeneratedPassport={handlePassportGenerated}
-            customerId={selectedCustomerId}
-            onFilePreview={handleFilePreview}
-            onPrinted={handleFilePrinted}
-            onUnbindLayout={handleUnbindLayout}
-          />
+  file={selectedFile}
+  customerImages={customerImages}
+  customerFiles={customerFiles}
+  onHideImage={handleHideImage}
+  onUnhideImage={handleUnhideImage}
+  onGeneratedImage={handleGenerated}
+  onGeneratedMulti={handleMultiGenerated}
+  onGeneratedPassport={handlePassportGenerated}
+  customerId={selectedCustomerId}
+  onFilePreview={handleFilePreview}
+  onPrinted={handleFilePrinted}
+  onUnbindLayout={handleUnbindLayout}
+  onJobsChanged={(updatedJobs) => {
+  if (Array.isArray(updatedJobs)) {
+    setJobs(updatedJobs);
+  }
+}}
+/>
+          
         </section>
       </main>
     </div>

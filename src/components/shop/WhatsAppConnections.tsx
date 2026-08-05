@@ -3,8 +3,9 @@ import { Cloud, LogOut, QrCode, RefreshCw, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { gatewayUrl } from "@/lib/gateway-url";
 
-const API = "http://127.0.0.1:3001/api";
+const API = gatewayUrl("/api");
 type GatewayStatus = {
   baileys: { state: string; qr?: string | null; user?: { name: string; number: string; avatarUrl?: string } | null; error?: string | null };
   meta: { state: string; phoneNumber: string; displayName: string; webhookPath: string; error?: string | null };

@@ -65,9 +65,105 @@ function requestDesktop(action, payload) {
 }
 
 async function readJson(file, fallback) { try { return JSON.parse(await fs.readFile(file, "utf8")); } catch (error) { logger.error({ file, error }, "Could not read JSON data file"); return fallback; } }
+const gatewayOrigin = `http://127.0.0.1:${port}`;
+
+function transformStoredFileReferences(value, transform) {
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      transformStoredFileReferences(item, transform),
+    );
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        transformStoredFileReferences(item, transform),
+      ]),
+    );
+  }
+
+  if (typeof value === "string") {
+    return transform(value);
+  }
+
+  return value;
+}
+
+function persistFileReference(value) {
+  if (value.startsWith("/api/files/")) {
+    return value;
+  }
+
+  try {
+    const parsed = new URL(value);
+
+    const isLocalGateway =
+      parsed.hostname === "127.0.0.1" ||
+      parsed.hostname === "localhost";
+
+    if (
+      isLocalGateway &&
+      parsed.pathname.startsWith("/api/files/")
+    ) {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+  } catch {}
+
+  return value;
+}
+
+function hydrateFileReference(value) {
+  if (value.startsWith("/api/files/")) {
+    return `${gatewayOrigin}${value}`;
+  }
+
+  try {
+    const parsed = new URL(value);
+
+    const isLocalGateway =
+      parsed.hostname === "127.0.0.1" ||
+      parsed.hostname === "localhost";
+
+    if (
+      isLocalGateway &&
+      parsed.pathname.startsWith("/api/files/")
+    ) {
+      return `${gatewayOrigin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+  } catch {}
+
+  return value;
+}
+
+function prepareJobsForStorage(value) {
+  return transformStoredFileReferences(
+    value,
+    persistFileReference,
+  );
+}
+
+function prepareJobsForRuntime(value) {
+  return transformStoredFileReferences(
+    value,
+    hydrateFileReference,
+  );
+}
 async function writeJson(file, value) {
-  const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  await fs.writeFile(temporary, JSON.stringify(value, null, 2), "utf8");
+  const temporary =
+    `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
+
+  const persistedValue =
+    file === jobsFile
+      ? prepareJobsForStorage(value)
+      : value;
+
+  await fs.writeFile(
+    temporary,
+    JSON.stringify(persistedValue, null, 2),
+    "utf8",
+  );
+
   await fs.rename(temporary, file);
 }
 async function readMetaConfig() {
@@ -81,7 +177,10 @@ async function readMetaConfig() {
 
 let contacts = await readJson(contactsFile, {});
 let messages = await readJson(messagesFile, {});
-let jobs = await readJson(jobsFile, []);
+let jobs = prepareJobsForRuntime(
+  await readJson(jobsFile, []),
+);
+await writeJson(jobsFile, jobs);
 const processingSourceMessages = new Set();
 
 function mergeLegacyEditedJobs() {
@@ -833,28 +932,61 @@ app.post("/api/jobs/processed", async (req, res, next) => {
       if (workingPath) await fs.rm(workingPath, { force: true }).catch(() => {});
     }
     const relativeFile = path.relative(filesDir, editedPath).split(path.sep).map(encodeURIComponent).join("/");
-    const editedFile = {
-      ...originalFile,
-      id: originalFile.id,
-      name: fileName,
-      kind: match[1] === "application/pdf" || extension === ".pdf" ? "pdf" : "image",
-      src: `http://127.0.0.1:${port}/api/files/${relativeFile}?v=${Date.now()}`,
-      thumbUrl: "",
-      livePreview: undefined,
-      workingSrc: undefined,
-      workingEdit: undefined,
-      originalFileId: originalFile.id,
-      originalFile,
-      isEdited: true,
-      receivedAt: Date.now(),
-    };
-    sourceJob.files = sourceJob.files.map((file) => file === currentFile ? editedFile : file);
-    sourceJob.lastAt = Date.now();
-    sourceJob.status = "print_ready";
-    sourceJob.files = sourceJob.files.map((file) => ({ ...file, status: "print_ready" }));
-    await writeJson(jobsFile, jobs);
-    res.json({ ok: true, jobs });
-  } catch (error) { next(error); }
+    const editedUrl =
+  `http://127.0.0.1:${port}/api/files/${relativeFile}?v=${Date.now()}`;
+
+const editedFile = {
+  ...originalFile,
+  id: originalFile.id,
+  name: fileName,
+  kind:
+    match[1] === "application/pdf" || extension === ".pdf"
+      ? "pdf"
+      : "image",
+
+  // Latest edited file
+  src: editedUrl,
+  processedSrc: editedUrl,
+  selectedSrc: editedUrl,
+  activeSrc: editedUrl,
+
+  // Keep immutable original
+  originalSrc:
+    originalFile.originalSrc ||
+    originalFile.src,
+
+  thumbUrl: "",
+  livePreview: undefined,
+  workingSrc: undefined,
+  workingEdit: undefined,
+
+  originalFileId: originalFile.id,
+  originalFile,
+
+  isEdited: true,
+  receivedAt: Date.now(),
+};
+
+sourceJob.files = sourceJob.files.map((file) =>
+  file === currentFile ? editedFile : file
+);
+
+sourceJob.lastAt = Date.now();
+sourceJob.status = "print_ready";
+sourceJob.files = sourceJob.files.map((file) => ({
+  ...file,
+  status: "print_ready",
+}));
+
+await writeJson(jobsFile, jobs);
+
+res.json({
+  ok: true,
+  jobs,
+});
+  } catch (error) {
+    next(error);
+  }
 });
 app.post("/api/jobs/aadhaar-layout", async (req, res, next) => {
   try {
@@ -895,8 +1027,14 @@ app.post("/api/jobs/aadhaar-layout", async (req, res, next) => {
       jobs.unshift(layoutJob);
     }
     await writeJson(jobsFile, jobs);
-    res.json({ ok: true, file: savedFile, jobs });
-  } catch (error) { next(error); }
+
+res.json({
+  ok: true,
+  jobs,
+});
+  } catch (error) {
+    next(error);
+  }
 });
 app.post("/api/jobs/multi-layout", async (req, res, next) => {
   try {
