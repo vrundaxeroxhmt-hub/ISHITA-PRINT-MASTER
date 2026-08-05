@@ -20,7 +20,7 @@ export function MultiPageLayout({files,onGenerate,initialState,initialPreview}:{
   const usable=useMemo(()=>files.filter((item)=>item.src && !item.layoutType),[files]);
   const [selected,setSelected]=useState<string[]>(initialState?.sourceFileIds || []); const [copies,setCopies]=useState<Record<string,number>>(initialState?.copies || {});
   const [rows,setRows]=useState(initialState?.rows || 2),[columns,setColumns]=useState(initialState?.columns || 2); const [orientation,setOrientation]=useState<"portrait"|"landscape">(initialState?.orientation || "portrait");
-  const [gap,setGap]=useState(initialState?.gap ?? 12),[keepSources,setKeepSources]=useState(initialState?.keepSources ?? true); const [previewPages,setPreviewPages]=useState<string[]>(initialPreview?[initialPreview]:[]),[previewIndex,setPreviewIndex]=useState(0); const [busy,setBusy]=useState(""),[error,setError]=useState("");
+  const [gap,setGap]=useState(initialState?.gap ?? 12),[keepSources,setKeepSources]=useState(initialState?.keepSources ?? false); const [previewPages,setPreviewPages]=useState<string[]>(initialPreview?[initialPreview]:[]),[previewIndex,setPreviewIndex]=useState(0); const [busy,setBusy]=useState(""),[error,setError]=useState("");
   const [step,setStep]=useState(initialState ? 3 : 0);
   const invalidate=()=>setPreviewPages([]); const toggle=(id:string)=>{setSelected((current)=>current.includes(id)?current.filter((item)=>item!==id):[...current,id]);invalidate();};
   const setCopy=(id:string,value:number)=>{setCopies((current)=>({...current,[id]:Math.max(1,Math.min(20,value))}));invalidate();};
