@@ -18,7 +18,8 @@ import {
   ArrowLeft,
   ArrowRight,
 } from "lucide-react";
-import type { PrintFile } from "@/lib/mock-data";
+import { gatewayUrl } from "@/lib/gateway-url";
+import { getFileSource, type PrintFile } from "@/lib/mock-data";
 import { DEFAULT_EDIT, type EditState } from "./types";
 import { Slider } from "./Slider";
 import { PerspectiveCropDialog } from "./PerspectiveCropDialog";
@@ -57,11 +58,13 @@ export function ImageEditor({
   contactId,
   onLivePreview,
   onSaveHandler,
+  onSelectSource,
 }: {
   file: PrintFile;
   contactId: string;
   onLivePreview?: (dataUrl: string, appliedCrop?: boolean) => void;
   onSaveHandler?: (handler: (() => Promise<void>) | null) => void;
+  onSelectSource?: (fileId: string, source: "original" | "processed") => Promise<void>;
 }) {
   // Per-file edit state + history
   const [edit, setEdit] = useState<EditState>(DEFAULT_EDIT);
@@ -97,8 +100,39 @@ export function ImageEditor({
     setAppliedSource(file.appliedCropSrc || null);
     setReviewStep(false);
     setActiveTab(guidedMode ? "transform" : "adjust");
-  }, [file.id, file.src]);
-  const baseSource = appliedSource || (file.workingEdit ? (file.originalFile?.src || file.src || "") : (file.src || ""));
+  }, [file.id, file.src, file.selectedSrc]);
+
+  const selectedBaseSource =
+  file.selectedSrc ||
+  file.originalFile?.src ||
+  file.src ||
+  file.originalSrc ||
+  "";
+
+const baseSource = appliedSource || selectedBaseSource;
+
+  const selectSource = async (source: "original" | "processed") => {
+    try {
+      if (onSelectSource) {
+        await onSelectSource(file.id, source);
+      } else {
+        await fetch(gatewayUrl(`/api/jobs/files/${file.id}/select-source`), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ source }),
+        });
+      }
+      skipCommit.current = true;
+      skipPersist.current = true;
+      setAppliedSource(null);
+      setPerspectiveSrc(null);
+      setEdit(DEFAULT_EDIT);
+      setHistory([DEFAULT_EDIT]);
+      setHistoryIdx(0);
+    } catch (err) {
+      console.error("Failed to select source:", err);
+    }
+  };
   useEffect(() => {
     let cancelled = false;
     if (!edit.perspective?.enabled || !baseSource) { setPerspectiveSrc(null); return; }
@@ -171,7 +205,7 @@ export function ImageEditor({
     setHistory([DEFAULT_EDIT]);
     setHistoryIdx(0);
     if (file.id) {
-      void fetch(`http://127.0.0.1:3001/api/jobs/files/${encodeURIComponent(file.id)}/reset`, { method: "POST" });
+      void fetch(gatewayUrl(`/api/jobs/files/${encodeURIComponent(file.id)}/reset`), { method: "POST" });
     }
   };
 
@@ -213,7 +247,7 @@ export function ImageEditor({
     setCropMode(false);
     onLivePreview?.(dataUrl, true);
     if (contactId) {
-      void fetch("http://127.0.0.1:3001/api/jobs/working-preview", {
+      void fetch(gatewayUrl("/api/jobs/working-preview"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ contactId, fileId: file.id, dataUrl, appliedCropDataUrl: dataUrl, edit: next }),
@@ -379,7 +413,7 @@ export function ImageEditor({
     const timer = window.setTimeout(async () => {
       const preview = renderMaster(3508, true, 1);
       if (!preview) return;
-      await fetch("http://127.0.0.1:3001/api/jobs/working-preview", {
+      await fetch(gatewayUrl("/api/jobs/working-preview"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ contactId, fileId: file.id, dataUrl: preview, edit }),
@@ -403,7 +437,7 @@ export function ImageEditor({
       const output = renderMaster(3508, true, 1);
       if (!output) throw new Error("Image is not ready yet.");
       const base = (file.originalFile?.name || file.name).replace(/\.[^.]+$/, "");
-      const response = await fetch("http://127.0.0.1:3001/api/jobs/processed", {
+      const response = await fetch(gatewayUrl("/api/jobs/processed"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ contactId, fileName: `${base}_edited.jpg`, mimeType: "image/jpeg", dataUrl: output, originalFileId: file.originalFileId || file.id }),
@@ -458,6 +492,30 @@ export function ImageEditor({
           >
             <RefreshCw className="h-3 w-3" /> Reset Original
           </button>
+          {file.processedSrc && (
+            <div className="ml-2 inline-flex rounded-md border border-border bg-accent/40 p-0.5 text-[11px]">
+              <button
+                onClick={() => selectSource("original")}
+                className={`rounded px-2 py-0.5 text-[10px] font-medium transition-all ${
+                  (file.selectedSrc === file.originalSrc || !file.selectedSrc || file.selectedSrc === file.src)
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "hover:bg-accent text-muted-foreground"
+                }`}
+              >
+                Original
+              </button>
+              <button
+                onClick={() => selectSource("processed")}
+                className={`rounded px-2 py-0.5 text-[10px] font-medium transition-all ${
+                  file.selectedSrc === file.processedSrc
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "hover:bg-accent text-muted-foreground"
+                }`}
+              >
+                AI Result
+              </button>
+            </div>
+          )}
           <span className="ml-2 text-[10px] text-muted-foreground">
             {historyIdx + 1} / {history.length}
           </span>

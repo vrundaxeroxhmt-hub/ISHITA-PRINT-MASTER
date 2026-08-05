@@ -1,5 +1,5 @@
 import { PDFDocument, rgb } from "pdf-lib";
-import type { PrintFile } from "@/lib/mock-data";
+import { getFileSource, type PrintFile } from "@/lib/mock-data";
 
 export type PhotoPrintLayout = "full" | "13x18-2" | "9x13-4";
 
@@ -10,7 +10,7 @@ export async function createBatchQualityPrintPdf(files: PrintFile[]) {
   const output = await PDFDocument.create();
   for (const file of files) {
     // The live preview is a small UI thumbnail and must never be preferred for print.
-    const sourceUrl = file.workingSrc || file.src || file.livePreview;
+    const sourceUrl = getFileSource(file);
     if (!sourceUrl) continue;
     if (file.kind === "pdf") {
       const source = await PDFDocument.load(await (await fetch(sourceUrl)).arrayBuffer());
@@ -59,7 +59,7 @@ async function imageAsJpeg(source: string) {
 }
 
 export async function createPhotoPrintPdf(file: PrintFile, layout: PhotoPrintLayout, repeat = true) {
-  const source = file.workingSrc || file.src || file.livePreview;
+  const source = getFileSource(file);
   if (!source) throw new Error("No printable image is available.");
   const passport4x6 = file.layoutType === "passport" && file.passportLayout?.preset === "4x6-8" && layout === "full";
   if (layout === "full" && !passport4x6) return createBatchQualityPrintPdf([file]);

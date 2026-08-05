@@ -12,6 +12,7 @@ export type PrintFile = {
   src?: string;
   originalSrc?: string;
   processedSrc?: string;
+  selectedSrc?: string;
   activeSrc?: string;
   aiProcessingStatus?: "processing" | "completed" | "skipped" | "failed";
   /** Temporary edited thumbnail shown live in the job list. */
@@ -156,3 +157,10 @@ export const mockJobs: JobCard[] = [
     ],
   },
 ];
+
+/** Shared authoritative source resolver for Review, Editor, Print, Thumbnails & Batch operations. */
+export function getFileSource(file?: PrintFile | null): string {
+  if (!file) return "";
+  return file.workingSrc || file.selectedSrc || file.src || file.originalSrc || file.livePreview || "";
+}
+

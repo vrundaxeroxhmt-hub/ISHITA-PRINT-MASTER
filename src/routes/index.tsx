@@ -13,6 +13,7 @@ import type { PassportLayoutState } from "@/components/shop/editor/PassportPhoto
 import { DateFilterDropdown, type DateFilterValue } from "@/components/shop/DateFilterDropdown";
 import type { PrintSettings } from "@/desktop-main";
 import { getInboundJobSynchronizer } from "@/ai";
+import { gatewayUrl } from "@/lib/gateway-url";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -43,7 +44,7 @@ export function Index() {
   const [printers, setPrinters] = useState<Array<{name:string;displayName?:string;isDefault?:boolean}>>([]);
   const [completionWindowSeconds, setCompletionWindowSeconds] = useState<number>(45);
   useEffect(() => {
-    fetch("http://127.0.0.1:3001/api/settings")
+    fetch(gatewayUrl("/api/settings"))
       .then((r) => r.json())
       .then((res) => {
         if (res.completionWindowSeconds) setCompletionWindowSeconds(res.completionWindowSeconds);
@@ -55,7 +56,7 @@ export function Index() {
     const { updateAISettings } = await import("@/ai");
     updateAISettings({ customerCompletionWindowSeconds: seconds });
     try {
-      await fetch("http://127.0.0.1:3001/api/settings", {
+      await fetch(gatewayUrl("/api/settings"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ completionWindowSeconds: seconds }),
@@ -64,7 +65,7 @@ export function Index() {
   };
   useEffect(() => { localStorage.setItem("printdesk.customerNameFontSize", String(customerNameFontSize)); }, [customerNameFontSize]);
   useEffect(() => { localStorage.setItem("printdesk.customerMobileFontSize", String(customerMobileFontSize)); }, [customerMobileFontSize]);
-  useEffect(() => { fetch("http://127.0.0.1:3001/api/settings/storage").then((response)=>response.json()).then((result)=>setMasterFolder(result.masterFolder||"")).catch(()=>{}); }, []);
+  useEffect(() => { fetch(gatewayUrl("/api/settings/storage")).then((response)=>response.json()).then((result)=>setMasterFolder(result.masterFolder||"")).catch(()=>{}); }, []);
   const selectMasterFolder = async () => {
     if (folderBusy) return;
     setFolderBusy(true);
@@ -72,7 +73,7 @@ export function Index() {
       if (!window.printDeskDesktop?.selectSaveFolder) throw new Error("Folder selection is available only in the SMART PRINT desktop application.");
       const selected = await window.printDeskDesktop.selectSaveFolder();
       if (selected.cancelled || !selected.folder) return;
-      const response = await fetch("http://127.0.0.1:3001/api/settings/storage", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ masterFolder: selected.folder }) });
+      const response = await fetch(gatewayUrl("/api/settings/storage"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ masterFolder: selected.folder }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Folder selection failed");
       setMasterFolder(result.masterFolder || selected.folder);
@@ -88,7 +89,7 @@ export function Index() {
     });
   }, []);
   useEffect(() => {
-    const loadJobs = () => fetch("http://127.0.0.1:3001/api/jobs").then((response) => response.ok ? response.json() : []).then((incoming: JobCard[]) => {
+    const loadJobs = () => fetch(gatewayUrl("/api/jobs")).then((response) => response.ok ? response.json() : []).then((incoming: JobCard[]) => {
       getInboundJobSynchronizer().synchronizeJobs(incoming);
       setJobs((current) => {
         const currentFiles = new Map(current.flatMap((item) => item.files).map((file) => [file.id, file]));
@@ -172,7 +173,7 @@ export function Index() {
     });
   const handleGenerated = async (dataUrl: string, _name: string, aadhaarLayout: AadhaarLayoutState) => {
     if (!selectedCustomerId) return;
-    const response = await fetch("http://127.0.0.1:3001/api/jobs/aadhaar-layout", {
+    const response = await fetch(gatewayUrl("/api/jobs/aadhaar-layout"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ contactId: selectedCustomerId, dataUrl, layout: aadhaarLayout }),
@@ -184,13 +185,13 @@ export function Index() {
   };
   const handleMultiGenerated = async (pages: string[], layout: MultiLayoutState) => {
     if (!selectedCustomerId) return;
-    const response = await fetch("http://127.0.0.1:3001/api/jobs/multi-layout", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ contactId: selectedCustomerId, pages, layout }) });
+    const response = await fetch(gatewayUrl("/api/jobs/multi-layout"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ contactId: selectedCustomerId, pages, layout }) });
     const result = await response.json(); if (!response.ok) throw new Error(result.error || "Multi layout save failed");
     setJobs(result.jobs); setHiddenIds(new Set()); setSelectedFileId(result.files[0]?.id || null);
   };
   const handlePassportGenerated = async (page: string, layout: PassportLayoutState, singles: Array<{ id: string; dataUrl: string }>) => {
     if (!selectedCustomerId) return;
-    const response = await fetch("http://127.0.0.1:3001/api/jobs/passport-layout", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ contactId: selectedCustomerId, page, layout, singles }) });
+    const response = await fetch(gatewayUrl("/api/jobs/passport-layout"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ contactId: selectedCustomerId, page, layout, singles }) });
     const result = await response.json(); if (!response.ok) throw new Error(result.error || "Passport sheet save failed");
     setJobs(result.jobs); setSelectedFileId(result.file.id);
   };
@@ -209,23 +210,23 @@ export function Index() {
     setSelectedFileId(file.id);
     if (!selectedCustomerId) return;
     setCustomers((prev) => prev.map((customer) => customer.id === selectedCustomerId ? { ...customer, unread: 0 } : customer));
-    fetch(`http://127.0.0.1:3001/api/contacts/${encodeURIComponent(selectedCustomerId)}/read`, { method: "POST" }).catch(() => {});
+    fetch(gatewayUrl(`/api/contacts/${encodeURIComponent(selectedCustomerId)}/read`), { method: "POST" }).catch(() => {});
     const owningJob = jobs.find((job) => job.files.some((item) => item.id === file.id));
     if (owningJob && owningJob.status === "in_review") {
-      fetch(`http://127.0.0.1:3001/api/jobs/${encodeURIComponent(owningJob.id)}/status`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "in_process" }) })
+      fetch(gatewayUrl(`/api/jobs/${encodeURIComponent(owningJob.id)}/status`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "in_process" }) })
         .then((response) => response.ok ? response.json() : null).then((result) => { if (result?.jobs) setJobs(result.jobs); }).catch(() => {});
     }
   };
   const handleJobStatus = async (jobId: string, status: JobCard["status"]) => {
-    const response = await fetch(`http://127.0.0.1:3001/api/jobs/${encodeURIComponent(jobId)}/status`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ status }) });
+    const response = await fetch(gatewayUrl(`/api/jobs/${encodeURIComponent(jobId)}/status`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ status }) });
     const result = await response.json(); if (response.ok) setJobs(result.jobs);
   };
   const handleFilePrinted = async (fileId: string) => {
-    const response = await fetch(`http://127.0.0.1:3001/api/jobs/files/${encodeURIComponent(fileId)}/status`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "printed" }) });
+    const response = await fetch(gatewayUrl(`/api/jobs/files/${encodeURIComponent(fileId)}/status`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "printed" }) });
     const result = await response.json(); if (response.ok) setJobs(result.jobs);
   };
   const handleUnbindLayout = async (fileId: string) => {
-    const response = await fetch(`http://127.0.0.1:3001/api/jobs/files/${encodeURIComponent(fileId)}/unbind-layout`, { method: "POST" });
+    const response = await fetch(gatewayUrl(`/api/jobs/files/${encodeURIComponent(fileId)}/unbind-layout`), { method: "POST" });
     const result = await response.json(); if (!response.ok) throw new Error(result.error || "Unbind failed");
     setJobs(result.jobs);
   };
@@ -234,23 +235,35 @@ export function Index() {
   }, []);
   const handleResetOriginal = async (fileId: string) => {
     try {
-      const response = await fetch(`http://127.0.0.1:3001/api/jobs/files/${encodeURIComponent(fileId)}/reset`, { method: "POST" });
+      const response = await fetch(gatewayUrl(`/api/jobs/files/${encodeURIComponent(fileId)}/reset`), { method: "POST" });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Reset failed");
       setJobs(result.jobs);
       setSelectedFileId(result.jobs.some((job: JobCard) => job.files.some((file: PrintFile) => file.id === fileId)) ? fileId : null);
     } catch (error) { console.error(error); }
   };
+  const handleSelectSource = async (fileId: string, source: "original" | "processed") => {
+    try {
+      const response = await fetch(gatewayUrl(`/api/jobs/files/${encodeURIComponent(fileId)}/select-source`), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Source selection failed");
+      setJobs(result.jobs);
+    } catch (error) { console.error(error); }
+  };
 
   const handleRemoveJob = (jobId: string) => {
     setJobs((prev) => prev.filter((j) => j.id !== jobId));
-    fetch(`http://127.0.0.1:3001/api/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" }).catch(() => {});
+    fetch(gatewayUrl(`/api/jobs/${encodeURIComponent(jobId)}`), { method: "DELETE" }).catch(() => {});
     if (selectedFile && jobs.find((j) => j.id === jobId)?.files.some((f) => f.id === selectedFile.id)) {
       setSelectedFileId(null);
     }
   };
   const handleRemoveFile = async (fileId: string) => {
-    const response = await fetch(`http://127.0.0.1:3001/api/jobs/files/${encodeURIComponent(fileId)}`, { method: "DELETE" });
+    const response = await fetch(gatewayUrl(`/api/jobs/files/${encodeURIComponent(fileId)}`), { method: "DELETE" });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "File delete failed");
     setJobs(result.jobs);

@@ -1,5 +1,5 @@
 import { FileText, Image as ImageIcon, RotateCcw, Trash2 } from "lucide-react";
-import type { PrintFile } from "@/lib/mock-data";
+import { getFileSource, type PrintFile } from "@/lib/mock-data";
 
 export function FileThumb({
   file,
@@ -19,7 +19,7 @@ export function FileThumb({
   onDelete?: () => void;
 }) {
   const isPdf = file.kind === "pdf";
-  const previewUrl = file.livePreview || file.thumbUrl || file.src;
+  const previewUrl = file.livePreview || file.thumbUrl || getFileSource(file);
   return (
     <button
       onClick={onClick}

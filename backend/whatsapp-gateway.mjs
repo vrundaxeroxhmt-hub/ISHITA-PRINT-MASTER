@@ -239,16 +239,16 @@ function triggerAsyncAiProcessing(sourcePath, fileId) {
 
       fileObj.originalSrc = fileObj.originalSrc || fileObj.src;
       fileObj.processedSrc = processedPublicFile;
+      fileObj.selectedSrc = processedPublicFile;
       fileObj.activeSrc = processedPublicFile;
-      fileObj.src = processedPublicFile;
       fileObj.aiProcessingStatus = "completed";
 
       await writeJson(jobsFile, jobs);
       logger.info({ jobId: job.id, fileId, processedFile: processedPath }, "[AI ENGINE] Processed derivative attached to job file successfully");
     } else {
       fileObj.originalSrc = fileObj.originalSrc || fileObj.src;
-      fileObj.activeSrc = fileObj.originalSrc;
-      fileObj.src = fileObj.originalSrc;
+      fileObj.selectedSrc = fileObj.originalSrc || fileObj.src;
+      fileObj.activeSrc = fileObj.originalSrc || fileObj.src;
       fileObj.aiProcessingStatus = res?.status === "skipped" ? "skipped" : "failed";
 
       await writeJson(jobsFile, jobs);
@@ -261,8 +261,8 @@ function triggerAsyncAiProcessing(sourcePath, fileId) {
       const fileObj = job.files.find((f) => f.id === fileId);
       if (fileObj) {
         fileObj.originalSrc = fileObj.originalSrc || fileObj.src;
-        fileObj.activeSrc = fileObj.originalSrc;
-        fileObj.src = fileObj.originalSrc;
+        fileObj.selectedSrc = fileObj.originalSrc || fileObj.src;
+        fileObj.activeSrc = fileObj.originalSrc || fileObj.src;
         fileObj.aiProcessingStatus = "failed";
         await writeJson(jobsFile, jobs);
       }
@@ -309,6 +309,7 @@ async function addPrintableJob({ contactId, buffer, fileName, mimeType, timestam
     status: "in_review",
     src: publicFile,
     originalSrc: publicFile,
+    selectedSrc: publicFile,
     activeSrc: publicFile,
     aiProcessingStatus: kind === "image" ? "processing" : undefined,
     originalFileId: originalFileId || undefined,
@@ -940,14 +941,20 @@ app.post("/api/batches", async (req, res, next) => {
       const liveMap = new Map(liveFiles.map((item) => [item.id, item.dataUrl]));
       for (const file of files) {
         const original = file.originalFile || file;
-        const originalPath = await storedPathFromUrl(original.src);
+        let origSourceUrl = original.originalSrc;
+        if (!origSourceUrl && original.src) {
+          origSourceUrl = original.src;
+          logger.warn({ fileId: original.id }, "[BATCH EXPORT] Legacy job file lacking originalSrc; using src as fallback");
+        }
+        const originalPath = origSourceUrl ? await storedPathFromUrl(origSourceUrl) : null;
         if (originalPath) await fs.copyFile(originalPath, path.join(originalDir, `${original.id}_${safeName(original.name)}`)).catch(() => {});
         const live = liveMap.get(file.id);
         if (live) {
           const match = String(live).match(/^data:([^;]+);base64,(.+)$/s);
           if (match) await fs.writeFile(path.join(editedDir, `${file.id}_edited.jpg`), Buffer.from(match[2], "base64"));
         } else {
-          const currentPath = await storedPathFromUrl(file.src);
+          const editedSourceUrl = file.workingSrc || file.selectedSrc || file.src;
+          const currentPath = editedSourceUrl ? await storedPathFromUrl(editedSourceUrl) : null;
           if (currentPath) await fs.copyFile(currentPath, path.join(editedDir, `${file.id}_${safeName(file.name)}`)).catch(() => {});
         }
       }
@@ -983,6 +990,59 @@ app.post("/api/jobs/files/:fileId/unbind-layout", async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+app.post("/api/jobs/files/:fileId/select-source", async (req, res, next) => {
+  try {
+    const { source } = req.body || {};
+    const fileId = req.params.fileId;
+
+    // Step A: Validate source enum strictly
+    if (source !== "original" && source !== "processed") {
+      return res.status(400).json({ error: "Invalid source parameter. Must be 'original' or 'processed'." });
+    }
+
+    const job = jobs.find((item) => item.files?.some((file) => file.id === fileId));
+    if (!job) return res.status(404).json({ error: "Job containing file not found." });
+    const fileObj = job.files.find((file) => file.id === fileId);
+    if (!fileObj) return res.status(404).json({ error: "File not found." });
+
+    // Step B & C: Resolve & confirm requested asset exists BEFORE mutating any state
+    let targetSourceUrl = "";
+    if (source === "processed") {
+      if (!fileObj.processedSrc) {
+        return res.status(400).json({ error: "Processed AI derivative is not available for this file." });
+      }
+      const processedPath = await storedPathFromUrl(fileObj.processedSrc);
+      if (processedPath && (!fsSync.existsSync(processedPath) || fsSync.statSync(processedPath).size === 0)) {
+        return res.status(400).json({ error: "Processed AI derivative file is missing or empty on disk." });
+      }
+      targetSourceUrl = fileObj.processedSrc;
+    } else {
+      targetSourceUrl = fileObj.originalSrc || fileObj.src;
+      if (!targetSourceUrl) {
+        return res.status(400).json({ error: "Original file source is not available." });
+      }
+      const originalPath = await storedPathFromUrl(targetSourceUrl);
+      if (originalPath && (!fsSync.existsSync(originalPath) || fsSync.statSync(originalPath).size === 0)) {
+        return res.status(400).json({ error: "Original file is missing or empty on disk." });
+      }
+    }
+
+    // Step D: Only after validation succeeds, clear stale editor-derived state
+    delete fileObj.workingSrc;
+    delete fileObj.workingEdit;
+    delete fileObj.appliedCropSrc;
+    delete fileObj.livePreview;
+
+    // Step E: Set selectedSrc and activeSrc
+    fileObj.selectedSrc = targetSourceUrl;
+    fileObj.activeSrc = targetSourceUrl;
+
+    // Step F: Persist jobs.json
+    await writeJson(jobsFile, jobs);
+    res.json({ ok: true, file: fileObj, jobs });
+  } catch (error) { next(error); }
+});
+
 app.post("/api/jobs/files/:fileId/reset", async (req, res, next) => {
   try {
     const multiJob = jobs.find((item) => item.files?.some((file) => file.id === req.params.fileId && (file.layoutType === "multiPage" || file.layoutType === "passport")));
@@ -1012,6 +1072,9 @@ app.post("/api/jobs/files/:fileId/reset", async (req, res, next) => {
       delete workingFile.workingSrc;
       delete workingFile.workingEdit;
       delete workingFile.appliedCropSrc;
+      delete workingFile.livePreview;
+      workingFile.selectedSrc = workingFile.originalSrc || workingFile.src;
+      workingFile.activeSrc = workingFile.originalSrc || workingFile.src;
       if (!workingFile.isEdited) {
         workingJob.status = "in_review";
         workingJob.files = workingJob.files.map((file) => ({ ...file, status: "in_review" }));

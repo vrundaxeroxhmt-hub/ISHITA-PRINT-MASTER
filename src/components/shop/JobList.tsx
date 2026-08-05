@@ -8,6 +8,7 @@ import { createBatchQualityPrintPdf, openPrintWindow, printPdfBytes } from "./pr
 import { invertSelectedFiles } from "./bulkNegativeInvert";
 import { DateFilterDropdown, type DateFilterValue } from "./DateFilterDropdown";
 import { getDefaultAIManager } from "@/ai";
+import { gatewayUrl } from "@/lib/gateway-url";
 
 export function JobList({
   customer,
@@ -91,7 +92,7 @@ export function JobList({
   };
   useEffect(() => {
     if (!customer) { setChat([]); return; }
-    const load = () => fetch(`http://127.0.0.1:3001/api/messages/${encodeURIComponent(customer.id)}`).then((response) => response.ok ? response.json() : []).then(setChat).catch(() => {});
+    const load = () => fetch(gatewayUrl(`/api/messages/${encodeURIComponent(customer.id)}`)).then((response) => response.ok ? response.json() : []).then(setChat).catch(() => {});
     load();
     const timer = window.setInterval(load, 2500);
     return () => window.clearInterval(timer);
@@ -111,7 +112,7 @@ export function JobList({
     if (!customer || !text || sending) return;
     setSending(true); setSendError("");
     try {
-      const response = await fetch(`http://127.0.0.1:3001/api/messages/${encodeURIComponent(customer.id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+      const response = await fetch(gatewayUrl(`/api/messages/${encodeURIComponent(customer.id)}`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Message failed");
       setChat(result); setMessage("");
@@ -136,7 +137,7 @@ export function JobList({
   const selectedPrintFiles = batchFiles.filter((file) => printSelectedIds.has(file.id));
   const manualUpload = async (files: File[]) => {
     if (!customer || !files.length || uploading) return; setUploading(true); setBatchMessage("");
-    try { for (const item of files) { const dataUrl = await new Promise<string>((resolve,reject) => { const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(reader.error);reader.readAsDataURL(item); }); const response=await fetch("http://127.0.0.1:3001/api/jobs/manual-upload",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({contactId:customer.id,fileName:item.name,mimeType:item.type,dataUrl})});const result=await response.json();if(!response.ok)throw new Error(result.error||"Upload failed"); } setBatchMessage(`${files.length} file(s) uploaded`); }
+    try { for (const item of files) { const dataUrl = await new Promise<string>((resolve,reject) => { const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(reader.error);reader.readAsDataURL(item); }); const response=await fetch(gatewayUrl("/api/jobs/manual-upload"),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({contactId:customer.id,fileName:item.name,mimeType:item.type,dataUrl})});const result=await response.json();if(!response.ok)throw new Error(result.error||"Upload failed"); } setBatchMessage(`${files.length} file(s) uploaded`); }
     catch(error){setBatchMessage(error instanceof Error?error.message:"Upload failed");}finally{setUploading(false);}
   };
   const saveBatch = async (mode: "separate" | "combined" | "both") => {
@@ -145,7 +146,7 @@ export function JobList({
     try {
       const combined = mode === "separate" ? undefined : bytesToDataUrl(await buildCombinedPdf(), "application/pdf");
       const liveFiles = batchFiles.filter((file) => file.kind === "image" && file.livePreview).map((file) => ({ id: file.id, dataUrl: file.livePreview }));
-      const response = await fetch("http://127.0.0.1:3001/api/batches", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ contactId: customer.id, mode, combinedPdf: combined, liveFiles, fileIds: batchFiles.map((file) => file.id) }) });
+      const response = await fetch(gatewayUrl("/api/batches"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ contactId: customer.id, mode, combinedPdf: combined, liveFiles, fileIds: batchFiles.map((file) => file.id) }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Batch save failed");
       setBatchMessage(`Saved: ${result.folder}`);
@@ -300,7 +301,7 @@ export function JobList({
                   file={f}
                   selected={f.id === selectedFileId}
                   onClick={() => onSelectFile(f, job.id)}
-                  onResetOriginal={f.isEdited || !!f.workingSrc || f.layoutType === "multiPage" || f.layoutType === "passport" ? () => onResetOriginal(f.id) : undefined}
+                  onResetOriginal={f.isEdited || !!f.workingSrc || f.selectedSrc === f.processedSrc || f.layoutType === "multiPage" || f.layoutType === "passport" ? () => onResetOriginal(f.id) : undefined}
                   checked={printSelectedIds.has(f.id)}
                   onCheck={(checked)=>setPrintSelectedIds((current)=>{const next=new Set(current);checked?next.add(f.id):next.delete(f.id);return next;})}
                   onDelete={() => { if (window.confirm(`Delete only ${f.name} from this batch?`)) void onRemoveFile(f.id); }}

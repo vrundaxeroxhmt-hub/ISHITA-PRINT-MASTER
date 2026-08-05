@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Printer, Save, Share2, Wrench, Layers, X } from "lucide-react";
-import type { PrintFile } from "@/lib/mock-data";
+import { getFileSource, type PrintFile } from "@/lib/mock-data";
 import { ImageEditor } from "./editor/ImageEditor";
 import { PdfEditor } from "./editor/PdfEditor";
 import { AadhaarLayout, type AadhaarLayoutState } from "./editor/AadhaarLayout";
@@ -24,15 +24,22 @@ export function PreviewPanel({
   onFilePreview,
   onPrinted,
   onUnbindLayout,
+  onSelectSource,
 }: {
+ 
   file: PrintFile | null;
   customerImages: PrintFile[];
   customerFiles: PrintFile[];
+  onSelectSource?: (fileId: string, source: "original" | "processed") => Promise<void>;
   onHideImage: (id: string) => void;
   onUnhideImage: (id: string) => void;
   onGeneratedImage: (dataUrl: string, name: string, state: AadhaarLayoutState) => void;
   onGeneratedMulti: (pages: string[], state: MultiLayoutState) => Promise<void>;
-  onGeneratedPassport: (page: string, state: PassportLayoutState, singles: Array<{ id: string; dataUrl: string }>) => Promise<void>;
+  onGeneratedPassport: (
+    page: string,
+    state: PassportLayoutState,
+    singles: Array<{ id: string; dataUrl: string }>
+  ) => Promise<void>;
   customerId: string | null;
   onFilePreview: (fileId: string, dataUrl: string, appliedCrop?: boolean) => void;
   onPrinted: (fileId: string) => void | Promise<void>;
@@ -74,14 +81,15 @@ export function PreviewPanel({
     setMode(nextMode);
   };
   const printSelected = async () => {
-    if (!file?.src || printing) return;
+    const activeSrc = getFileSource(file);
+    if (!activeSrc || printing) return;
     let printWindow: Window | null;
     try { printWindow = openPrintWindow(); }
     catch (error) { setSaveMessage(error instanceof Error ? error.message : "Print window was blocked"); return; }
     setPrinting(true); setSaveMessage("");
     try {
       if (file.kind === "pdf") {
-        const bytes = new Uint8Array(await (await fetch(file.src)).arrayBuffer());
+        const bytes = new Uint8Array(await (await fetch(activeSrc)).arrayBuffer());
         printPdfBytes(bytes, printWindow);
       } else {
         printPdfBytes(await createPhotoPrintPdf(file, printLayout, repeatPrint), printWindow);
@@ -179,7 +187,7 @@ export function PreviewPanel({
       </div>
       {saveMessage && <div className="border-b border-border bg-primary/10 px-3 py-1 text-[10px] text-primary">{saveMessage}</div>}
       <div className="min-h-0 flex-1 overflow-hidden">
-        {isPdf ? <PdfEditor file={file} chatFiles={customerFiles} contactId={customerId || ""} onLivePreview={updateLivePreview} onSaveHandler={registerSave} /> : <ImageEditor file={file} contactId={customerId || ""} onLivePreview={updateLivePreview} onSaveHandler={registerSave} />}
+        {isPdf ? <PdfEditor file={file} chatFiles={customerFiles} contactId={customerId || ""} onLivePreview={updateLivePreview} onSaveHandler={registerSave} /> : <ImageEditor file={file} contactId={customerId || ""} onLivePreview={updateLivePreview} onSaveHandler={registerSave} onSelectSource={onSelectSource} />}
       </div>
       {printOpen && <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/65 p-6" onClick={() => setPrintOpen(false)}>
         <div className="w-[460px] rounded-lg border border-border bg-card p-4 shadow-2xl" onClick={(event) => event.stopPropagation()}>
