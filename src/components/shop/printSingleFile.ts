@@ -46,16 +46,30 @@ function getBatchPrintSource(
 export async function createBatchQualityPrintPdf(
   files: PrintFile[],
   sourceMode: BatchPrintSource = "latest",
+  startEachFileOnNewSheet = false,
 ) {
   const output = await PDFDocument.create();
+  let previousFileEndedOnOddPage = false;
   for (const file of files) {
-    // The live preview is a small UI thumbnail and must never be preferred for print.
-    const sourceUrl = getBatchPrintSource(file, sourceMode);
-    if (!sourceUrl) continue;
+  if (
+    startEachFileOnNewSheet &&
+    previousFileEndedOnOddPage
+  ) {
+    output.addPage([595, 842]);
+  }
+
+  // 👇 આ line અહીં add કરવી
+  const pageCountBeforeFile = output.getPageCount();
+
+  const sourceUrl = getBatchPrintSource(file, sourceMode);
+
+  if (!sourceUrl) continue;
     if (file.kind === "pdf") {
       const source = await PDFDocument.load(await (await fetch(sourceUrl)).arrayBuffer());
       const copied = await output.copyPages(source, source.getPageIndices());
       copied.forEach((page) => output.addPage(page));
+      previousFileEndedOnOddPage =
+  (output.getPageCount() - pageCountBeforeFile) % 2 === 1;
       continue;
     }
     const response = await fetch(sourceUrl);
@@ -74,6 +88,8 @@ export async function createBatchQualityPrintPdf(
     const margin = 18, scale = Math.min((page.getWidth() - margin * 2) / embedded.width, (page.getHeight() - margin * 2) / embedded.height);
     const width = embedded.width * scale, height = embedded.height * scale;
     page.drawImage(embedded, { x: (page.getWidth() - width) / 2, y: (page.getHeight() - height) / 2, width, height });
+    previousFileEndedOnOddPage =
+  (output.getPageCount() - pageCountBeforeFile) % 2 === 1;
   }
   if (!output.getPageCount()) throw new Error("No printable file is available.");
   return output.save();

@@ -47,6 +47,8 @@ export function JobList({
   const [printSelectedIds, setPrintSelectedIds] = useState<Set<string>>(new Set());
   const [printSourceMode, setPrintSourceMode] =
   useState<BatchPrintSource>("latest");
+  const [startEachFileOnNewSheet, setStartEachFileOnNewSheet] =
+  useState(false);
   const [uploading, setUploading] = useState(false);
   const [jobHistoryFilter, setJobHistoryFilter] = useState<DateFilterValue>("today");
   const [jobCustomDays, setJobCustomDays] = useState(7);
@@ -142,7 +144,11 @@ export function JobList({
   files = batchFiles,
   sourceMode: BatchPrintSource = printSourceMode,
 ) => {
-  return createBatchQualityPrintPdf(files, sourceMode);
+  return createBatchQualityPrintPdf(
+    files,
+    sourceMode,
+    startEachFileOnNewSheet,
+  );
 };
   const selectedPrintFiles = batchFiles.filter((file) => printSelectedIds.has(file.id));
   const manualUpload = async (files: File[]) => {
@@ -290,6 +296,18 @@ export function JobList({
     <option value="latest">Latest Edited</option>
     <option value="original">Original</option>
   </select>
+  <label className="col-span-2 flex items-center justify-between rounded-md border border-border bg-background/50 px-2 py-1.5 text-[10px]">
+  <span>Start each file on new sheet</span>
+
+  <input
+    type="checkbox"
+    checked={startEachFileOnNewSheet}
+    onChange={(event) =>
+      setStartEachFileOnNewSheet(event.target.checked)
+    }
+    className="h-4 w-4 accent-cyan-500"
+  />
+</label>
 </div>
           <button onClick={invertSelected} disabled={!selectedPrintFiles.length || !!batchBusy} className="inline-flex min-w-0 items-center justify-center gap-1 rounded-md border border-primary/60 bg-primary/10 px-1.5 py-1.5 text-[10px] text-primary disabled:opacity-40"><Sparkles className="h-3 w-3 shrink-0" /> <span className="truncate">Invert ({selectedPrintFiles.length})</span></button>
         </div>
