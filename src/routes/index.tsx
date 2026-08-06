@@ -274,28 +274,35 @@ export function Index() {
 
   return (
     <div className="flex h-dvh max-h-dvh w-full flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex shrink-0 items-center gap-3 border-b border-border bg-card/40 px-4 py-2">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
+      <header className="flex shrink-0 items-center gap-4 border-b border-border bg-gradient-to-r from-card/90 via-card/85 to-card/90 backdrop-blur-xl px-5 py-2.5 shadow-md shadow-purple-950/20">
+        <div className="flex items-center gap-3">
+          <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-purple-700 via-purple-600 to-indigo-500 text-white shadow-md shadow-purple-900/40 ring-1 ring-white/20">
             <Printer className="h-4 w-4" />
           </div>
           <div>
-            <h1 className="text-sm font-bold leading-tight">SMART PRINT</h1>
-            <p className="text-[10px] leading-tight text-muted-foreground">IM TECHNOLOGY</p>
+            <div className="flex items-center gap-1.5">
+              <h1 className="text-sm font-extrabold tracking-wider text-foreground">SMART PRINT</h1>
+              <span className="rounded-full bg-primary/20 px-1.5 py-0.2 text-[8px] font-bold tracking-wider text-primary border border-primary/30 uppercase">STUDIO PRO</span>
+            </div>
+            <p className="text-[9px] font-medium tracking-widest text-muted-foreground uppercase">IM TECHNOLOGY</p>
           </div>
         </div>
         <WhatsAppConnections onContacts={handleLiveContacts} />
         <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
           <DateFilterDropdown value={historyFilter} onChange={setHistoryFilter} customDays={customDays} onCustomDaysChange={setCustomDays} prefix="Customers: " />
-          <div className="flex items-center gap-1.5">
-            <MessageSquare className="h-3.5 w-3.5" />
+          <div className="inline-flex items-center gap-2 rounded-full border border-purple-500/30 bg-purple-950/30 px-3 py-1 text-[11px] font-medium text-purple-200 shadow-inner">
+            <span className="relative flex h-2 w-2">
+              {totalPending > 0 && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>}
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${totalPending > 0 ? "bg-purple-400" : "bg-muted-foreground/50"}`}></span>
+            </span>
+            <MessageSquare className="h-3.5 w-3.5 text-purple-300" />
             <span>{totalPending} pending</span>
           </div>
           <div className="relative">
-            <button onClick={() => setShowSettings((value) => !value)} className={`rounded-md p-1.5 hover:bg-accent ${showSettings ? "bg-accent text-foreground" : ""}`} title="Settings">
+            <button onClick={() => setShowSettings((value) => !value)} className={`rounded-xl border border-border p-2 transition-all hover:bg-accent hover:border-primary/40 ${showSettings ? "bg-primary/20 border-primary text-primary shadow-sm" : "bg-card/60 text-foreground"}`} title="Settings">
               <Settings className="h-4 w-4" />
             </button>
-            {showSettings && <div className="absolute right-0 top-full z-[80] mt-2 max-h-[82vh] w-80 overflow-y-auto rounded-lg border border-border bg-card p-4 text-foreground shadow-2xl">
+            {showSettings && <div className="absolute right-0 top-full z-[80] mt-2 max-h-[82vh] w-84 overflow-y-auto rounded-xl border border-border bg-card p-4.5 text-foreground shadow-2xl backdrop-blur-xl">
               <div className="mb-3 flex items-center"><div><h3 className="text-xs font-semibold">Display Settings</h3><p className="text-[9px] text-muted-foreground">Column 1 customer text</p></div><button onClick={() => setShowSettings(false)} className="ml-auto rounded px-2 py-1 text-xs hover:bg-accent">×</button></div>
               <label className="mb-4 block"><span className="mb-1 flex justify-between text-[10px]"><span>Name text size</span><span className="text-primary">{customerNameFontSize}px</span></span><input type="range" min={9} max={22} step={1} value={customerNameFontSize} onChange={(event) => setCustomerNameFontSize(Number(event.target.value))} className="w-full accent-cyan-400" /><div style={{fontSize:customerNameFontSize}} className="mt-1 truncate rounded bg-background/60 px-2 py-1 font-medium">Customer Name Preview</div></label>
               <label className="block"><span className="mb-1 flex justify-between text-[10px]"><span>Mobile number size</span><span className="text-primary">{customerMobileFontSize}px</span></span><input type="range" min={8} max={18} step={1} value={customerMobileFontSize} onChange={(event) => setCustomerMobileFontSize(Number(event.target.value))} className="w-full accent-cyan-400" /><div style={{fontSize:customerMobileFontSize}} className="mt-1 rounded bg-background/60 px-2 py-1 text-muted-foreground">+91 98765 43210</div></label>

@@ -44,18 +44,57 @@ export function WhatsAppConnections({ onContacts }: { onContacts: (contacts: unk
 
   return <>
     <div className="ml-4 flex items-center gap-2">
-      <div className={`flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] ${connected ? "border-status-ready/40 bg-status-ready/10 text-status-ready" : "border-border text-muted-foreground"}`}>
-        <Smartphone className="h-3 w-3" /><span>{connected ? `${status?.baileys.user?.name} ${status?.baileys.user?.number}` : "Baileys disconnected"}</span>
-        {!connected ? <button onClick={connectBaileys} title="Show QR"><QrCode className="h-3.5 w-3.5" /></button> : <>
-          <button onClick={resetBaileys} title="Reset WhatsApp Session"><RefreshCw className="h-3.5 w-3.5" /></button>
-          <button onClick={() => post("/baileys/logout")} title="Logout"><LogOut className="h-3.5 w-3.5" /></button>
-        </>}
+      <div className={`flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-medium transition-all shadow-sm ${connected ? "border-emerald-500/40 bg-emerald-950/30 text-emerald-300 shadow-emerald-950/20" : "border-border bg-card/60 text-muted-foreground"}`}>
+        <span className="relative flex h-2 w-2">
+          {connected && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
+          <span className={`relative inline-flex rounded-full h-2 w-2 ${connected ? "bg-emerald-400" : "bg-amber-500/80"}`}></span>
+        </span>
+        <Smartphone className="h-3.5 w-3.5" />
+        <span className="truncate max-w-[170px]">{connected ? `${status?.baileys.user?.name} ${status?.baileys.user?.number}` : "Baileys disconnected"}</span>
+        {!connected ? (
+          <button onClick={connectBaileys} title="Show QR" className="ml-1 rounded p-1 transition-colors hover:bg-white/10 hover:text-foreground">
+            <QrCode className="h-3.5 w-3.5" />
+          </button>
+        ) : (
+          <div className="flex items-center gap-1 ml-1 border-l border-emerald-500/30 pl-1.5">
+            <button onClick={resetBaileys} title="Reset WhatsApp Session" className="rounded p-0.5 transition-colors hover:bg-emerald-500/20 hover:text-emerald-200">
+              <RefreshCw className="h-3 w-3" />
+            </button>
+            <button onClick={() => post("/baileys/logout")} title="Logout" className="rounded p-0.5 transition-colors hover:bg-rose-500/20 hover:text-rose-300">
+              <LogOut className="h-3 w-3" />
+            </button>
+          </div>
+        )}
       </div>
-      <div className={`flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] ${metaConnected ? "border-sky-500/40 bg-sky-500/10 text-sky-600" : "border-border text-muted-foreground"}`}>
-        <Cloud className="h-3 w-3" /><span>{metaConnected ? `${status?.meta.displayName} ${status?.meta.phoneNumber}` : "Meta disconnected"}</span>
-        {!metaConnected ? <><button onClick={() => setMetaOpen(true)}>Connect</button>{status?.meta.state !== "disconnected" && <button onClick={() => post("/meta/check")} title="Check connection"><RefreshCw className="h-3.5 w-3.5" /></button>}</> : <><button onClick={() => post("/meta/check")} title="Check connection"><RefreshCw className="h-3.5 w-3.5" /></button><button onClick={() => post("/meta/logout")} title="Disconnect"><LogOut className="h-3.5 w-3.5" /></button></>}
+
+      <div className={`flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-medium transition-all shadow-sm ${metaConnected ? "border-sky-500/40 bg-sky-950/30 text-sky-300 shadow-sky-950/20" : "border-border bg-card/60 text-muted-foreground"}`}>
+        <span className="relative flex h-2 w-2">
+          {metaConnected && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>}
+          <span className={`relative inline-flex rounded-full h-2 w-2 ${metaConnected ? "bg-sky-400" : "bg-muted-foreground/60"}`}></span>
+        </span>
+        <Cloud className="h-3.5 w-3.5" />
+        <span className="truncate max-w-[170px]">{metaConnected ? `${status?.meta.displayName} ${status?.meta.phoneNumber}` : "Meta disconnected"}</span>
+        {!metaConnected ? (
+          <div className="flex items-center gap-1 ml-1 border-l border-border pl-1.5">
+            <button onClick={() => setMetaOpen(true)} className="rounded px-1.5 py-0.5 text-[10px] bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30">Connect</button>
+            {status?.meta.state !== "disconnected" && (
+              <button onClick={() => post("/meta/check")} title="Check connection" className="rounded p-0.5 transition-colors hover:bg-accent">
+                <RefreshCw className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 ml-1 border-l border-sky-500/30 pl-1.5">
+            <button onClick={() => post("/meta/check")} title="Check connection" className="rounded p-0.5 transition-colors hover:bg-sky-500/20 hover:text-sky-200">
+              <RefreshCw className="h-3 w-3" />
+            </button>
+            <button onClick={() => post("/meta/logout")} title="Disconnect" className="rounded p-0.5 transition-colors hover:bg-rose-500/20 hover:text-rose-300">
+              <LogOut className="h-3 w-3" />
+            </button>
+          </div>
+        )}
       </div>
-      {error && <span className="text-[10px] text-destructive">{error}</span>}
+      {error && <span className="rounded-full bg-rose-950/40 border border-rose-500/30 px-2 py-0.5 text-[10px] font-medium text-rose-300">{error}</span>}
     </div>
     <Dialog open={baileysOpen} onOpenChange={setBaileysOpen}>
       <DialogContent className="sm:max-w-sm"><DialogHeader><DialogTitle>Connect Baileys WhatsApp</DialogTitle><DialogDescription>WhatsApp → Linked devices → Link a deviceથી QR scan કરો.</DialogDescription></DialogHeader>
