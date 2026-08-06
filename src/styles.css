@@ -155,4 +155,23 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
   }
+
+  /* Thin Modern Dark Purple Scrollbar */
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: oklch(0.26 0.045 285);
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: oklch(0.55 0.18 290);
+  }
 }

@@ -250,87 +250,92 @@ export function JobList({
   }
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="shrink-0 space-y-2 border-b border-border p-3">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-card/5">
+      <div className="shrink-0 space-y-2.5 border-b border-border/80 p-3 bg-gradient-to-r from-card/50 to-card/30 backdrop-blur-md">
         <div className="flex min-w-0 items-center gap-2">
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-semibold">{customer.name}</h2>
-            <p className="truncate text-[10px] text-muted-foreground">{customer.mobile}</p>
+            <h2 className="truncate text-sm font-bold text-foreground">{customer.name}</h2>
+            <p className="truncate text-[10px] font-medium text-muted-foreground">{customer.mobile}</p>
           </div>
           <DateFilterDropdown value={jobHistoryFilter} onChange={setJobHistoryFilter} customDays={jobCustomDays} onCustomDaysChange={setJobCustomDays} prefix="Jobs: " />
         </div>
         <div className="grid grid-cols-4 gap-1.5">
-          <label className="inline-flex min-w-0 cursor-pointer items-center justify-center gap-1 rounded-md border border-border bg-accent/40 px-1.5 py-1.5 text-[10px] hover:bg-accent">
-            <Upload className="h-3 w-3 shrink-0" />
-            <span className="truncate">{uploading ? "Uploading..." : "Manual Upload"}</span><input type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(event)=>{const items=Array.from(event.target.files||[]);event.target.value="";void manualUpload(items);}} />
+          <label className="inline-flex min-w-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border bg-card/60 px-2 py-1.5 text-[10px] font-medium text-foreground transition-all hover:bg-card hover:border-primary/40 shadow-xs">
+            <Upload className="h-3.5 w-3.5 shrink-0 text-primary" />
+            <span className="truncate">{uploading ? "Uploading..." : "Manual Upload"}</span>
+            <input type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(event)=>{const items=Array.from(event.target.files||[]);event.target.value="";void manualUpload(items);}} />
           </label>
-          <button onClick={() => setBatchOpen(true)} className="inline-flex min-w-0 items-center justify-center gap-1 rounded-md border border-border bg-accent/40 px-1.5 py-1.5 text-[10px] hover:bg-accent"><Files className="h-3 w-3 shrink-0" /> <span className="truncate">Batch Save</span></button>
-          <div className="col-span-2 grid grid-cols-[1fr_120px] overflow-hidden rounded-md border border-primary">
-  <button
-    onClick={() => void printSelected(printSourceMode)}
-    disabled={!selectedPrintFiles.length || !!batchBusy}
-    className="inline-flex min-w-0 items-center justify-center gap-1 bg-primary px-2 py-1.5 text-[10px] font-medium text-primary-foreground disabled:opacity-40"
-  >
-    <Printer className="h-3 w-3 shrink-0" />
+          <button onClick={() => setBatchOpen(true)} className="inline-flex min-w-0 items-center justify-center gap-1.5 rounded-xl border border-border bg-card/60 px-2 py-1.5 text-[10px] font-medium text-foreground transition-all hover:bg-card hover:border-primary/40 shadow-xs">
+            <Files className="h-3.5 w-3.5 shrink-0 text-primary" />
+            <span className="truncate">Batch Save</span>
+          </button>
+          <div className="col-span-2 grid grid-cols-[1fr_120px] overflow-hidden rounded-xl border border-primary/70 shadow-sm shadow-purple-950/30">
+            <button
+              onClick={() => void printSelected(printSourceMode)}
+              disabled={!selectedPrintFiles.length || !!batchBusy}
+              className="inline-flex min-w-0 items-center justify-center gap-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 px-2.5 py-1.5 text-[10px] font-bold text-white transition-all hover:brightness-110 disabled:opacity-40"
+            >
+              <Printer className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">
+                {batchBusy
+                  ? "Preparing..."
+                  : printSourceMode === "latest"
+                    ? `Print Latest (${selectedPrintFiles.length})`
+                    : `Print Original (${selectedPrintFiles.length})`}
+              </span>
+            </button>
 
-    <span className="truncate">
-      {batchBusy
-        ? "Preparing..."
-        : printSourceMode === "latest"
-          ? `Print Latest (${selectedPrintFiles.length})`
-          : `Print Original (${selectedPrintFiles.length})`}
-    </span>
-  </button>
-
-  <select
-    value={printSourceMode}
-    onChange={(event) =>
-      setPrintSourceMode(
-        event.target.value as BatchPrintSource,
-      )
-    }
-    disabled={!!batchBusy}
-    className="border-l border-primary/40 bg-background px-2 text-[10px] text-foreground outline-none disabled:opacity-40"
-    title="Choose print version"
-  >
-    <option value="latest">Latest Edited</option>
-    <option value="original">Original</option>
-  </select>
-  <label className="col-span-2 flex items-center justify-between rounded-md border border-border bg-background/50 px-2 py-1.5 text-[10px]">
-  <span>Start each file on new sheet</span>
-
-  <input
-    type="checkbox"
-    checked={startEachFileOnNewSheet}
-    onChange={(event) =>
-      setStartEachFileOnNewSheet(event.target.checked)
-    }
-    className="h-4 w-4 accent-cyan-500"
-  />
-</label>
-</div>
-          <button onClick={invertSelected} disabled={!selectedPrintFiles.length || !!batchBusy} className="inline-flex min-w-0 items-center justify-center gap-1 rounded-md border border-primary/60 bg-primary/10 px-1.5 py-1.5 text-[10px] text-primary disabled:opacity-40"><Sparkles className="h-3 w-3 shrink-0" /> <span className="truncate">Invert ({selectedPrintFiles.length})</span></button>
+            <select
+              value={printSourceMode}
+              onChange={(event) =>
+                setPrintSourceMode(
+                  event.target.value as BatchPrintSource,
+                )
+              }
+              disabled={!!batchBusy}
+              className="border-l border-primary/40 bg-card px-2 text-[10px] font-medium text-foreground outline-none disabled:opacity-40 cursor-pointer"
+              title="Choose print version"
+            >
+              <option value="latest">Latest Edited</option>
+              <option value="original">Original</option>
+            </select>
+            <label className="col-span-2 flex items-center justify-between border-t border-primary/30 bg-card/90 px-2.5 py-1.5 text-[10px] font-medium text-muted-foreground">
+              <span>Start each file on new sheet</span>
+              <input
+                type="checkbox"
+                checked={startEachFileOnNewSheet}
+                onChange={(event) =>
+                  setStartEachFileOnNewSheet(event.target.checked)
+                }
+                className="h-3.5 w-3.5 accent-primary cursor-pointer rounded"
+              />
+            </label>
+          </div>
+          <button onClick={invertSelected} disabled={!selectedPrintFiles.length || !!batchBusy} className="inline-flex min-w-0 items-center justify-center gap-1.5 rounded-xl border border-primary/40 bg-primary/10 px-2 py-1.5 text-[10px] font-bold text-primary transition-all hover:bg-primary/20 disabled:opacity-40 shadow-xs">
+            <Sparkles className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">Invert ({selectedPrintFiles.length})</span>
+          </button>
         </div>
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3">
         {visibleJobs.map((job) => (
           <div
             key={job.id}
-            className="rounded-lg border border-border bg-card/60 p-2.5"
+            className="rounded-xl border border-border/80 bg-card/60 p-3 transition-all hover:border-primary/40 hover:bg-card/80 shadow-xs"
           >
-            <div className={`flex items-center gap-2 ${expandedJobs.has(job.id) ? "mb-2" : ""}`}>
-              <button onClick={() => toggleJob(job.id)} className="flex min-w-0 flex-1 items-center gap-2 rounded p-1 text-left hover:bg-accent/50">
-              {expandedJobs.has(job.id) ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-primary" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
-              <StatusBadge status={job.status} />
-              <span className="text-[10px] text-muted-foreground">
-                {job.files.length} file{job.files.length > 1 ? "s" : ""} · {relTime(job.lastAt)}
-              </span>
+            <div className={`flex items-center gap-2 ${expandedJobs.has(job.id) ? "mb-2.5" : ""}`}>
+              <button onClick={() => toggleJob(job.id)} className="flex min-w-0 flex-1 items-center gap-2 rounded-lg p-1 text-left hover:bg-primary/10 transition-colors">
+                {expandedJobs.has(job.id) ? <ChevronDown className="h-4 w-4 shrink-0 text-primary" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                <StatusBadge status={job.status} />
+                <span className="rounded-full bg-card/80 border border-border px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                  {job.files.length} file{job.files.length > 1 ? "s" : ""} · {relTime(job.lastAt)}
+                </span>
               </button>
               <select
                 value={job.status}
                 onChange={(event) => onStatusChange(job.id, event.target.value as JobCard["status"])}
                 onClick={(event) => event.stopPropagation()}
-                className="max-w-24 rounded border border-border bg-background px-1 py-1 text-[9px] outline-none focus:border-primary"
+                className="max-w-26 rounded-lg border border-border bg-card px-2 py-1 text-[10px] font-medium outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary cursor-pointer"
                 title="Change job status"
               >
                 <option value="in_review">In Review</option>
@@ -340,7 +345,7 @@ export function JobList({
               </select>
               <button
                 onClick={() => onRemoveJob(job.id)}
-                className="ml-auto rounded p-1 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
+                className="ml-auto rounded-lg p-1 text-muted-foreground hover:bg-rose-950/40 hover:text-rose-400 transition-colors"
                 title="Remove job"
               >
                 <Trash2 className="h-3.5 w-3.5" />
